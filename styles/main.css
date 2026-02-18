@@ -1,0 +1,141 @@
+/* UpScale Quantum Interconnect — Base Styles */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-navy: #0d1520;
+  --steel-blue: #4a6a8a;
+  --copper: #b07a3d;
+  --copper-glow: #d4a04a;
+  --node-blue: #8cb4e0;
+  --node-blue-dark: #5a8aba;
+  --white: #e8edf2;
+  --dim-text: rgba(232, 237, 242, 0.35);
+  --grid-grey: rgba(140, 180, 224, 0.08);
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-navy);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Full-viewport WebGL canvas */
+#canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+/* HTML overlay — sits above canvas */
+#overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Subtle screen-edge vignette */
+#overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(13, 21, 32, 0.55) 100%
+  );
+  pointer-events: none;
+}
+
+/* Text overlays */
+.overlay-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--white);
+  font-family: 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Final wordmark — bottom third */
+.wordmark {
+  position: absolute;
+  left: 50%;
+  bottom: 28%;
+  transform: translateX(-50%);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wordmark-img {
+  height: 56px;
+  display: block;
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+/* Click-to-start overlay */
+#start-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-navy);
+  z-index: 100;
+  cursor: pointer;
+  transition: opacity 0.8s ease;
+}
+
+#start-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.start-content {
+  text-align: center;
+}
+
+.start-logo-img {
+  height: 72px;
+  display: block;
+  margin: 0 auto 28px;
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+.start-prompt {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--dim-text);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: pulse-opacity 2s ease-in-out infinite;
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UpScale Quantum Interconnect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles/main.css" />
+</head>
+<body>
+  <!-- WebGL canvas -->
+  <canvas id="canvas"></canvas>
+
+  <!-- HTML overlay: text elements rendered on top of WebGL -->
+  <div id="overlay">
+    <!-- Act 2 text -->
+    <div id="text-act2" class="overlay-text">These machines cannot talk to each other.</div>
+
+    <!-- Final wordmark -->
+    <div id="wordmark" class="wordmark">
+      <img class="wordmark-img" src="/logo.png" alt="UpScale Quantum" />
+    </div>
+  </div>
+
+  <!-- Click-to-start overlay -->
+  <div id="start-screen">
+    <div class="start-content">
+      <img class="start-logo-img" src="/logo.png" alt="UpScale Quantum" />
+      <div class="start-prompt">Click to begin</div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
