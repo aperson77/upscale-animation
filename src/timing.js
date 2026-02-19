@@ -7,21 +7,19 @@
  *
  * Beat boundaries (all in milliseconds):
  *   BEAT1      0 –  5 000   One Machine — close-up Waterloo, lattice attempt fails
- *   BEAT2   5 000 – 11 000   Three Islands — Ontario triangle, quantum failures, text
- *   BEAT3  11 000 – 15 000   The Interconnect — copper cascade, Ontario triangle connects
- *   BEAT4  15 000 – 22 000   Canada + Space — national network + satellites
- *   BEAT5  22 000 – 27 000   Global — worldwide cascade
- *   FINAL  27 000 – 30 000   Stillness + wordmark
+ *   BEAT2   5 000 – 10 000   Local Interconnect — Waterloo's 3 nodes link + lattice payoff
+ *   BEAT3  10 000 – 16 000   Isolated Subnets — zoom out, quantum dissolution, text
+ *   BEAT4  16 000 – 25 000   The Network — local interconnects everywhere, subnet cascade
+ *   FINAL  25 000 – 30 000   Stillness + capability flashes + wordmark
  */
 
 // ─── Phase table ─────────────────────────────────────────────────────────────
 export const PHASES = Object.freeze({
   BEAT1: { start:      0, end:  5_000 },
-  BEAT2: { start:  5_000, end: 11_000 },
-  BEAT3: { start: 11_000, end: 15_000 },
-  BEAT4: { start: 15_000, end: 22_000 },
-  BEAT5: { start: 22_000, end: 27_000 },
-  FINAL: { start: 27_000, end: 30_000 },
+  BEAT2: { start:  5_000, end: 10_000 },
+  BEAT3: { start: 10_000, end: 16_000 },
+  BEAT4: { start: 16_000, end: 25_000 },
+  FINAL: { start: 25_000, end: 30_000 },
 });
 
 export const TOTAL_DURATION = 30_000; // ms
@@ -114,7 +112,6 @@ export class Timeline {
   get beat2() { return this.phase('BEAT2'); }
   get beat3() { return this.phase('BEAT3'); }
   get beat4() { return this.phase('BEAT4'); }
-  get beat5() { return this.phase('BEAT5'); }
   get final() { return this.phase('FINAL'); }
 
   /**

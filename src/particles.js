@@ -1,236 +1,548 @@
 /**
  * particles.js — Beat 1 close-up animation.
  *
- * Creates:
- *  1. Four orbital particles circling the hero node (visible through Beat 1).
- *  2. A molecular hex lattice (1 centre + 6 ring) that assembles, stalls with
- *     jitter, then scatters — fitting inside the 5 s Beat 1 window.
- *  3. Hero node emissive intensity ramps up during assembly, spikes at stall,
- *     then decays when the lattice collapses.
+ * A single node attempts a complex computation and fails.
  *
- * All geometry lives inside globeGroup (co-rotates with the globe).
- * Everything fades out as the camera pulls back at t=5 s, gone by t=7 s.
+ * 0–0.5s:     Quiet hero node, subtle pulse.
+ * 0.5–3.5s:   A compact hexagonal grid/mesh GROWS outward from the node
+ *             (2–3 node-widths radius). Concentric WAVE PULSES ripple
+ *             outward from the node every ~0.55s, lighting up grid lines
+ *             and intersection points as they pass. Data dots flow along
+ *             edges. Grid is dense near the node, fading at the perimeter.
+ * 3.5–4.5s:   GLITCH FAILURE — digital corruption from outer edges inward.
+ *             Waves stutter and fragment. Grid sections blink, jitter, die.
+ * 4.5–5.0s:   Other Waterloo nodes + hub fade in.
  */
 
 import * as THREE from 'three';
 
-// ─── Colours ──────────────────────────────────────────────────────────────────
-const C_BLUE     = new THREE.Color(0x4da8ff);
-const C_BLUE_DIM = new THREE.Color(0x2a80d0);
+// ─── Colors ─────────────────────────────────────────────────────────────────
+const NODE_COLOR = 0x8cb4e0;
+const GRID_COLOR = new THREE.Color(0.4, 0.6, 1.0);    // blue-white grid lines
+const VERT_COLOR = new THREE.Color(0.55, 0.75, 1.0);  // brighter intersections
+const DOT_COLOR  = new THREE.Color(0.85, 0.93, 1.0);  // bright data pulses
 
-const ATOM_R = 0.001;   // significantly smaller than NODE_RADIUS (0.003)
+// ─── Timing ─────────────────────────────────────────────────────────────────
+const BUILD_START    = 0.5;
+const BUILD_END      = 7.0;   // lattice extends over this period
+const COLLAPSE_START = 7.0;   // lattice fully built → glitch
+const COLLAPSE_END   = 9.0;   // 2s glitch — dramatic failure
+const OTHERS_REVEAL  = 9.0;
 
-// ─── Beat 1 timing (absolute seconds) ────────────────────────────────────────
-const BUILD_END   = 2.8;   // lattice fully assembled
-const STALL_END   = 4.2;   // stall / jitter phase ends
-const SCATTER_END = 5.0;   // collapse complete (Beat 1 ends at 5 s)
+// ─── Grid config ────────────────────────────────────────────────────────────
+// Tight grid for close-up framing (FOV 24°)
+const HEX_RINGS    = 4;
+const HEX_SPACING  = 0.0016;
+const MAX_RADIUS   = HEX_RINGS * HEX_SPACING;  // 0.0052
+const FADE_START   = MAX_RADIUS * 0.5;          // radial fade begins at 50%
 
-// ─── Tangent frame at hero surface ───────────────────────────────────────────
-function tangentFrame(heroPos) {
-  const heroN = heroPos.clone().normalize();
-  const heroT = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), heroN).normalize();
-  const heroB = new THREE.Vector3().crossVectors(heroN, heroT).normalize();
-  return { heroN, heroT, heroB };
-}
+const VERT_SIZE = 0.0019;
+const DOT_SIZE  = 0.0020;
+const DOT_COUNT = 20;
 
-function makeTp(heroPos, { heroN, heroT, heroB }) {
-  return (u, v, h = 0.05) =>
-    heroPos.clone()
-      .addScaledVector(heroT, u)
-      .addScaledVector(heroB, v)
-      .addScaledVector(heroN, h);
-}
+// ─── Wave pulse config ──────────────────────────────────────────────────────
+const WAVE_INTERVAL  = 0.55;   // new wave every 0.55s — brisk at start
+const WAVE_SPEED     = 0.014;  // radial expansion (units/sec) — faster initially
+const WAVE_WIDTH     = 0.003;  // ring thickness — wider, softer
+const WAVE_INTENSITY = 1.0;    // peak brightness — subtle glow, not flash
 
-// ─── Updatable two-point line (no GC) ────────────────────────────────────────
-function makeUpdLine(mat) {
-  const buf = new Float32Array(6);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(buf, 3));
-  return { line: new THREE.Line(geo, mat), buf, geo };
-}
-
-// ─── 1. Orbital particles ────────────────────────────────────────────────────
-function buildOrbital(heroPos, { heroN, heroT, heroB }, globeGroup) {
-  const COUNT = 4;
-  const buf   = new Float32Array(COUNT * 3);
-  const geo   = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(buf, 3));
-
-  const mat = new THREE.PointsMaterial({
-    color:           C_BLUE,
-    size:            0.001,
-    transparent:     true,
-    opacity:         0.9,
-    sizeAttenuation: true,
-    depthWrite:      false,
-  });
-  globeGroup.add(new THREE.Points(geo, mat));
-
-  const cfg = [
-    { r: 0.009, spd:  1.30, ph: 0.00,    tilt:  0.00 },
-    { r: 0.007, spd: -1.00, ph: 2.20,    tilt:  0.50 },
-    { r: 0.010, spd:  1.60, ph: Math.PI, tilt: -0.40 },
-    { r: 0.008, spd: -1.20, ph: 4.40,    tilt:  0.70 },
-  ];
-
-  const _v = new THREE.Vector3();
-  const _t = new THREE.Vector3();
-
-  return function update(t, alpha) {
-    mat.opacity = 0.85 * alpha;
-    for (let i = 0; i < COUNT; i++) {
-      const c   = cfg[i];
-      const ang = t * c.spd * Math.PI * 2 + c.ph;
-      _t.copy(heroT).addScaledVector(heroN, -c.tilt).normalize();
-      _v.copy(heroPos)
-        .addScaledVector(_t,    Math.cos(ang) * c.r)
-        .addScaledVector(heroB, Math.sin(ang) * c.r);
-      buf[i * 3    ] = _v.x;
-      buf[i * 3 + 1] = _v.y;
-      buf[i * 3 + 2] = _v.z;
-    }
-    geo.attributes.position.needsUpdate = true;
+// ─── Seeded PRNG ────────────────────────────────────────────────────────────
+function createRNG(seed) {
+  return function () {
+    seed = (seed * 1664525 + 1013904223) & 0x7fffffff;
+    return seed / 0x7fffffff;
   };
 }
 
-// ─── 2. Molecular hex lattice ─────────────────────────────────────────────────
-// 1 centre + 6 hexagonal ring = 7 atoms, 12 bonds.
-// Assembles smoothly to full completion in BUILD_END seconds, stalls with
-// vibration, then scatters. Familiar molecular style from the original code.
-function buildLattice(tp, globeGroup) {
-  const r = 0.008;
-  const defs = [
-    [0, 0, 0.003],
-    ...Array.from({ length: 6 }, (_, i) => {
-      const a = (i / 6) * Math.PI * 2;
-      return [r * Math.cos(a), r * Math.sin(a), 0.003];
-    }),
-  ];
-  const bonds = [
-    [0,1],[0,2],[0,3],[0,4],[0,5],[0,6],
-    [1,2],[2,3],[3,4],[4,5],[5,6],[6,1],
-  ];
+// ─── Fast integer hash (glitch randomness) ──────────────────────────────────
+function hash(n) {
+  n = ((n >> 16) ^ n) * 0x45d9f3b | 0;
+  n = ((n >> 16) ^ n) * 0x45d9f3b | 0;
+  return ((n >> 16) ^ n) & 0x7fffffff;
+}
 
-  const group   = new THREE.Group();
+// ─── Round point texture ────────────────────────────────────────────────────
+function createCircleTexture() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const c = size / 2;
+  const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
+  grad.addColorStop(0,   'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.8)');
+  grad.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function hexDist(q, r) { return Math.max(Math.abs(q), Math.abs(r), Math.abs(q + r)); }
+
+// ─── createAct1Animations ───────────────────────────────────────────────────
+export function createAct1Animations(globeGroup, heroNode, clusters) {
+  const rand  = createRNG(42);
+  const group = new THREE.Group();
   globeGroup.add(group);
-  const atomGeo = new THREE.SphereGeometry(ATOM_R, 6, 5);
 
-  const atoms = defs.map(([u, v, h]) => {
-    const mat  = new THREE.MeshBasicMaterial({ color: C_BLUE, transparent: true, opacity: 0 });
-    const mesh = new THREE.Mesh(atomGeo, mat);
-    mesh.position.copy(tp(u, v, h));
-    group.add(mesh);
-    const su = u || (Math.random() - 0.5) * 0.02;
-    const sv = v || (Math.random() - 0.5) * 0.02;
-    return { mesh, mat, base: mesh.position.clone(), scatter: new THREE.Vector3(su, sv, 0.01).normalize() };
-  });
+  // All Waterloo nodes are always visible — during the single-node close-up
+  // the other nodes are simply out of frame due to camera framing.
 
-  const bondLines = bonds.map(([ai, bi]) => {
-    const mat = new THREE.LineBasicMaterial({ color: C_BLUE_DIM, transparent: true, opacity: 0, depthWrite: false });
-    const obj = makeUpdLine(mat);
-    group.add(obj.line);
-    return { ...obj, mat, ai, bi };
-  });
+  const heroPos   = heroNode.position.clone();
+  const normal    = heroPos.clone().normalize();
+  const tangent   = new THREE.Vector3()
+    .crossVectors(new THREE.Vector3(0, 1, 0), normal).normalize();
+  const bitangent = new THREE.Vector3()
+    .crossVectors(normal, tangent).normalize();
 
-  const scatterSpd = atoms.map(() => 0.008 + Math.random() * 0.008);
+  function toWorld(x, y, h) {
+    return heroPos.clone()
+      .addScaledVector(tangent, x)
+      .addScaledVector(bitangent, y)
+      .addScaledVector(normal, h);
+  }
 
-  return function update(t, alpha) {
-    if (alpha <= 0) {
-      atoms.forEach(a => (a.mat.opacity = 0));
-      bondLines.forEach(b => (b.mat.opacity = 0));
-      return;
+  // ── Generate hex grid vertices ──────────────────────────────────────────
+  const verts   = [];
+  const vertMap = new Map();
+
+  for (let q = -HEX_RINGS; q <= HEX_RINGS; q++) {
+    for (let r = -HEX_RINGS; r <= HEX_RINGS; r++) {
+      const ring = hexDist(q, r);
+      if (ring > HEX_RINGS) continue;
+
+      const x    = HEX_SPACING * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);
+      const y    = HEX_SPACING * (1.5 * r);
+      const dist = Math.sqrt(x * x + y * y);
+      const h    = 0.004 + ring * 0.0003;
+
+      // Radial fade: bright at center, fading at perimeter
+      const radialFade = dist <= FADE_START
+        ? 1
+        : Math.max(0, 1 - (dist - FADE_START) / (MAX_RADIUS - FADE_START));
+
+      // Reveal time: inner rings first
+      const revealT = BUILD_START + (ring / HEX_RINGS) * (BUILD_END - BUILD_START - 0.8);
+
+      const idx = verts.length;
+      vertMap.set(`${q},${r}`, idx);
+      verts.push({
+        idx, q, r, ring, dist,
+        baseX: x, baseY: y, h,
+        worldPos: toWorld(x, y, h),
+        revealT, radialFade,
+      });
     }
+  }
 
-    let buildP = 0, scatterP = 0;
-    if (t < 0)              { buildP = 0; }
-    else if (t < BUILD_END) { buildP = t / BUILD_END; }
-    else if (t < STALL_END) { buildP = 1; }
-    else if (t < SCATTER_END) {
-      buildP   = 1;
-      scatterP = (t - STALL_END) / (SCATTER_END - STALL_END);
-    } else {
-      buildP = 0; scatterP = 1;
+  // ── Generate edges ──────────────────────────────────────────────────────
+  const ADJ   = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  const edges = [];
+
+  for (const v of verts) {
+    for (const [dq, dr] of ADJ) {
+      const nIdx = vertMap.get(`${v.q + dq},${v.r + dr}`);
+      if (nIdx === undefined || v.idx >= nIdx) continue;
+
+      const nv       = verts[nIdx];
+      const edgeRing = Math.max(v.ring, nv.ring);
+      const edgeDist = (v.dist + nv.dist) / 2; // midpoint distance for waves
+      const revealT  = Math.max(v.revealT, nv.revealT);
+      const radialFade = Math.min(v.radialFade, nv.radialFade);
+
+      // a = inner vertex, b = outer (for draw direction)
+      const aIdx = v.ring <= nv.ring ? v.idx : nIdx;
+      const bIdx = aIdx === v.idx ? nIdx : v.idx;
+
+      edges.push({ a: aIdx, b: bIdx, ring: edgeRing, dist: edgeDist, revealT, radialFade });
     }
+  }
 
-    // Stall jitter: vibrate positions when assembled but stuck
-    const jitter = (t >= BUILD_END && t < SCATTER_END)
-      ? Math.min((t - BUILD_END) / 0.6, 1) * 0.001 * Math.sin(t * 20) : 0;
+  const nVerts = verts.length;
+  const nEdges = edges.length;
 
-    atoms.forEach((a, i) => {
-      const birth = i / atoms.length;
-      const build = Math.min(Math.max((buildP - birth) / (1 / atoms.length + 0.15), 0), 1);
-      a.mat.opacity = build * (1 - scatterP) * alpha;
-      const p = a.base.clone();
-      if (scatterP > 0) p.addScaledVector(a.scatter, scatterP * scatterSpd[i]);
-      if (jitter) {
-        p.x += Math.sin(i * 2.1 + t * 15) * jitter;
-        p.y += Math.cos(i * 1.9 + t * 12) * jitter;
+  // ── Shared texture ──────────────────────────────────────────────────────
+  const circleTex = createCircleTexture();
+
+  // ── Vertex Points (grid intersections) ──────────────────────────────────
+  const vPosArr = new Float32Array(nVerts * 3);
+  const vColArr = new Float32Array(nVerts * 3);
+  const vGeo    = new THREE.BufferGeometry();
+  vGeo.setAttribute('position', new THREE.BufferAttribute(vPosArr, 3));
+  vGeo.setAttribute('color',    new THREE.BufferAttribute(vColArr, 3));
+
+  const vMat = new THREE.PointsMaterial({
+    size: VERT_SIZE, map: circleTex, transparent: true,
+    blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    depthWrite: false, vertexColors: true,
+  });
+  const vertexPoints = new THREE.Points(vGeo, vMat);
+  group.add(vertexPoints);
+
+  // Init positions
+  for (const v of verts) {
+    const i3 = v.idx * 3;
+    vPosArr[i3] = v.worldPos.x; vPosArr[i3 + 1] = v.worldPos.y; vPosArr[i3 + 2] = v.worldPos.z;
+  }
+
+  // ── Edge LineSegments ───────────────────────────────────────────────────
+  const ePosArr = new Float32Array(nEdges * 6);
+  const eColArr = new Float32Array(nEdges * 6);
+  const eGeo    = new THREE.BufferGeometry();
+  eGeo.setAttribute('position', new THREE.BufferAttribute(ePosArr, 3));
+  eGeo.setAttribute('color',    new THREE.BufferAttribute(eColArr, 3));
+
+  const eMat = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const edgeLines = new THREE.LineSegments(eGeo, eMat);
+  group.add(edgeLines);
+
+  // ── Data dots (dt-accumulated so slowdown is smooth) ────────────────────
+  const dotInfos = [];
+  for (let d = 0; d < DOT_COUNT; d++) {
+    dotInfos.push({
+      edgeIdx: Math.floor(rand() * nEdges),
+      speed:   0.65 + rand() * 0.55,
+      pos:     rand(),   // accumulated position 0→1, updated with dt
+    });
+  }
+
+  const dPosArr = new Float32Array(DOT_COUNT * 3);
+  const dColArr = new Float32Array(DOT_COUNT * 3);
+  const dGeo    = new THREE.BufferGeometry();
+  dGeo.setAttribute('position', new THREE.BufferAttribute(dPosArr, 3));
+  dGeo.setAttribute('color',    new THREE.BufferAttribute(dColArr, 3));
+
+  const dMat = new THREE.PointsMaterial({
+    size: DOT_SIZE, map: circleTex, transparent: true,
+    blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    depthWrite: false, vertexColors: true,
+  });
+  const dotMesh = new THREE.Points(dGeo, dMat);
+  group.add(dotMesh);
+
+  // ── Reusable vector ───────────────────────────────────────────────────────
+  const _p = new THREE.Vector3();
+
+  // ── Wave pulse brightness ─────────────────────────────────────────────────
+  // Returns extra brightness from wave pulses at a given radial distance.
+  const FIRST_WAVE = BUILD_START + 0.3;
+  const MAX_WAVE_AGE = MAX_RADIUS / WAVE_SPEED * 1.5; // time for wave to exit grid
+
+  function getWaveBright(elapsed, dist, baseX, baseY) {
+    if (elapsed < FIRST_WAVE) return 0;
+
+    const collapseP = elapsed >= COLLAPSE_START
+      ? (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START)
+      : 0;
+
+    // Build progress: as lattice extends, everything slows
+    const buildP = elapsed < BUILD_START ? 0
+      : elapsed < BUILD_END ? (elapsed - BUILD_START) / (BUILD_END - BUILD_START)
+      : 1;
+
+    let peak = 0;
+    const startT = Math.max(FIRST_WAVE, elapsed - MAX_WAVE_AGE);
+    const firstIdx = Math.ceil((startT - FIRST_WAVE) / WAVE_INTERVAL);
+    const lastIdx  = Math.floor((elapsed - FIRST_WAVE) / WAVE_INTERVAL);
+
+    for (let wi = firstIdx; wi <= lastIdx; wi++) {
+      const waveT = FIRST_WAVE + wi * WAVE_INTERVAL;
+      const age   = elapsed - waveT;
+      if (age < 0) continue;
+
+      // During collapse: waves skip and fragment
+      if (collapseP > 0) {
+        const h1 = hash(wi * 777);
+        if (h1 % 3 === 0) continue;
+
+        const angle  = Math.atan2(baseY, baseX);
+        const sector = hash(wi * 333 + Math.floor((angle + Math.PI) * 3));
+        if (sector % 5 < collapseP * 5) continue;
       }
-      a.mesh.position.copy(p);
-    });
 
-    const bBuild = Math.min(Math.max(buildP * 1.6 - 0.5, 0), 1);
-    bondLines.forEach(b => {
-      b.mat.opacity = bBuild * (1 - scatterP) * 0.45 * alpha;
-      const pa = atoms[b.ai].mesh.position, pb = atoms[b.bi].mesh.position;
-      b.buf[0]=pa.x; b.buf[1]=pa.y; b.buf[2]=pa.z;
-      b.buf[3]=pb.x; b.buf[4]=pb.y; b.buf[5]=pb.z;
-      b.geo.attributes.position.needsUpdate = true;
-    });
-  };
-}
+      // Waves slow as lattice extends — speed drops to 20% at full build
+      const waveSlowdown = 1 - buildP * buildP * 0.8;
+      const radius   = age * WAVE_SPEED * waveSlowdown;
+      const waveFade = Math.max(0, 1 - radius / (MAX_RADIUS * 1.2));
+      const d        = Math.abs(dist - radius);
 
-// ─── 3. Hero node emissive pulse ─────────────────────────────────────────────
-// particles.js owns hero emissiveIntensity during Beat 1 only.
-function updateHeroPulse(heroNode, t) {
-  if (t >= SCATTER_END) {
-    heroNode.mat.emissiveIntensity = 1.55; // hand back to globe.js baseline
-    return;
+      if (d < WAVE_WIDTH) {
+        const ring = (1 - d / WAVE_WIDTH) * waveFade;
+        peak = Math.max(peak, ring);
+      }
+    }
+
+    // Waves dim as lattice grows, further during collapse
+    const buildDim = 1 - buildP * buildP * 0.4;
+    return peak * WAVE_INTENSITY * buildDim * (1 - collapseP * 0.7);
   }
-  if (t < BUILD_END) {
-    // Ramp up: 2.4 → 3.2 while assembling
-    heroNode.mat.emissiveIntensity = 2.4 + 0.8 * (t / BUILD_END);
-    return;
+
+  // ── Per-frame update ──────────────────────────────────────────────────────
+  function update(elapsed, dt) {
+
+    const glitchFrame = Math.floor(elapsed * 30);  // 30fps — digital choppy
+    let anyVisible = false;
+
+    // ── Update vertices ─────────────────────────────────────────────────
+    for (const v of verts) {
+      const i3 = v.idx * 3;
+
+      const revealAge = elapsed - v.revealT;
+      if (revealAge < 0) {
+        vColArr[i3] = vColArr[i3 + 1] = vColArr[i3 + 2] = 0;
+        vPosArr[i3] = v.worldPos.x; vPosArr[i3 + 1] = v.worldPos.y; vPosArr[i3 + 2] = v.worldPos.z;
+        continue;
+      }
+
+      const fadeIn = Math.min(revealAge / 0.3, 1);
+
+      // Base brightness: steady during build, no pulsing
+      const baseBright = 0.30;
+
+      // Wave brightness — gentle glow, not blinking
+      const waveBright = getWaveBright(elapsed, v.dist, v.baseX, v.baseY) * 0.5;
+
+      let bright = (baseBright + waveBright) * fadeIn * v.radialFade;
+      let jitterX = 0, jitterY = 0;
+      let dead = false;
+
+      // ── Progressive strain — grid dims more as it extends ─────────
+      if (elapsed >= BUILD_START && elapsed < COLLAPSE_START) {
+        const bP = (elapsed - BUILD_START) / (BUILD_END - BUILD_START);
+        // Quadratic curve: subtle at first, obvious by the end
+        bright *= 1 - bP * bP * 0.4;
+      }
+
+      // ── Glitch during collapse ──────────────────────────────────────
+      if (elapsed >= COLLAPSE_START) {
+        const cP    = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
+        // Outer rings die first, inner rings last
+        const delay = (HEX_RINGS - v.ring) / HEX_RINGS * 0.4;
+        const gT    = Math.max(0, (cP - delay) / (1 - delay));
+
+        if (gT >= 0.85) {
+          dead = true;
+        } else if (gT > 0) {
+          // Per-vertex sporadic digital glitch
+          const h1 = hash(v.idx * 1000 + glitchFrame);
+          const h2 = hash(v.idx * 2000 + glitchFrame);
+
+          // Blink off — increasing probability as collapse progresses
+          const blinkChance = gT * 8;
+          if ((h1 % 10) < blinkChance) {
+            bright = 0;
+          } else {
+            bright *= (1 - gT * 0.6);
+          }
+
+          // Jitter — vertices scatter outward
+          jitterX = ((h1 % 200) / 200 - 0.5) * gT * 0.003;
+          jitterY = ((h2 % 200) / 200 - 0.5) * gT * 0.003;
+
+          // White flash — rare bright spike
+          const flashH = hash(v.idx * 5000 + Math.floor(elapsed * 15));
+          if ((flashH % 5) === 0 && gT > 0.3 && bright > 0) {
+            bright = 2.0;
+          }
+        }
+      }
+
+      if (dead) {
+        vColArr[i3] = vColArr[i3 + 1] = vColArr[i3 + 2] = 0;
+        vPosArr[i3] = v.worldPos.x; vPosArr[i3 + 1] = v.worldPos.y; vPosArr[i3 + 2] = v.worldPos.z;
+        continue;
+      }
+
+      anyVisible = true;
+
+      vColArr[i3]     = VERT_COLOR.r * bright;
+      vColArr[i3 + 1] = VERT_COLOR.g * bright;
+      vColArr[i3 + 2] = VERT_COLOR.b * bright;
+
+      if (jitterX !== 0 || jitterY !== 0) {
+        _p.copy(v.worldPos)
+          .addScaledVector(tangent, jitterX)
+          .addScaledVector(bitangent, jitterY);
+        vPosArr[i3] = _p.x; vPosArr[i3 + 1] = _p.y; vPosArr[i3 + 2] = _p.z;
+      } else {
+        vPosArr[i3] = v.worldPos.x; vPosArr[i3 + 1] = v.worldPos.y; vPosArr[i3 + 2] = v.worldPos.z;
+      }
+    }
+
+    vGeo.attributes.position.needsUpdate = true;
+    vGeo.attributes.color.needsUpdate    = true;
+
+    // ── Update edges ────────────────────────────────────────────────────
+    for (let ei = 0; ei < nEdges; ei++) {
+      const edge = edges[ei];
+      const e0   = ei * 6;
+      const e1   = e0 + 3;
+      const aI3  = edge.a * 3;
+      const bI3  = edge.b * 3;
+
+      const revealAge = elapsed - edge.revealT;
+      if (revealAge < 0) {
+        for (let k = 0; k < 6; k++) eColArr[e0 + k] = 0;
+        ePosArr[e0] = ePosArr[e1] = vPosArr[aI3];
+        ePosArr[e0 + 1] = ePosArr[e1 + 1] = vPosArr[aI3 + 1];
+        ePosArr[e0 + 2] = ePosArr[e1 + 2] = vPosArr[aI3 + 2];
+        continue;
+      }
+
+      // Edge draws outward from inner vertex
+      const drawT = Math.min(revealAge / 0.35, 1);
+      const drawE = easeOutCubic(drawT);
+
+      // Base + wave brightness — steady, no flickering
+      const baseBright = 0.25;
+      const waveBright = getWaveBright(elapsed, edge.dist, 0, 0) * 0.4;
+      let bright = (baseBright + waveBright) * drawE * edge.radialFade;
+      let dead = false;
+
+      // ── Progressive strain — edges dim as grid extends ────────────
+      if (elapsed >= BUILD_START && elapsed < COLLAPSE_START) {
+        const bP = (elapsed - BUILD_START) / (BUILD_END - BUILD_START);
+        bright *= 1 - bP * bP * 0.4;
+      }
+
+      // ── Glitch ──────────────────────────────────────────────────────
+      if (elapsed >= COLLAPSE_START) {
+        const cP    = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
+        const delay = (HEX_RINGS - edge.ring) / HEX_RINGS * 0.35;
+        const gT    = Math.max(0, (cP - delay) / (1 - delay));
+
+        if (gT >= 0.85) {
+          dead = true;
+        } else if (gT > 0) {
+          const h1 = hash(ei * 3000 + glitchFrame);
+          if ((h1 % 10) < gT * 8) {
+            bright = 0;
+          } else {
+            bright *= (1 - gT * 0.6);
+          }
+        }
+      }
+
+      if (dead) {
+        for (let k = 0; k < 6; k++) eColArr[e0 + k] = 0;
+        continue;
+      }
+
+      if (bright > 0.001) anyVisible = true;
+
+      // Positions
+      const ax = vPosArr[aI3], ay = vPosArr[aI3 + 1], az = vPosArr[aI3 + 2];
+      const bx = vPosArr[bI3], by = vPosArr[bI3 + 1], bz = vPosArr[bI3 + 2];
+
+      ePosArr[e0]     = ax; ePosArr[e0 + 1] = ay; ePosArr[e0 + 2] = az;
+      if (drawT < 1) {
+        ePosArr[e1]     = ax + (bx - ax) * drawE;
+        ePosArr[e1 + 1] = ay + (by - ay) * drawE;
+        ePosArr[e1 + 2] = az + (bz - az) * drawE;
+      } else {
+        ePosArr[e1] = bx; ePosArr[e1 + 1] = by; ePosArr[e1 + 2] = bz;
+      }
+
+      const cr = GRID_COLOR.r * bright;
+      const cg = GRID_COLOR.g * bright;
+      const cb = GRID_COLOR.b * bright;
+      eColArr[e0] = cr; eColArr[e0 + 1] = cg; eColArr[e0 + 2] = cb;
+      eColArr[e1] = cr; eColArr[e1 + 1] = cg; eColArr[e1 + 2] = cb;
+    }
+
+    eGeo.attributes.position.needsUpdate = true;
+    eGeo.attributes.color.needsUpdate    = true;
+
+    // ── Update data dots ────────────────────────────────────────────────
+    for (let di = 0; di < DOT_COUNT; di++) {
+      const dot  = dotInfos[di];
+      const edge = edges[dot.edgeIdx];
+      const d3   = di * 3;
+      const aI3  = edge.a * 3;
+      const bI3  = edge.b * 3;
+
+      const revealAge = elapsed - edge.revealT;
+      if (revealAge < 0.4) {
+        dColArr[d3] = dColArr[d3 + 1] = dColArr[d3 + 2] = 0;
+        dPosArr[d3] = vPosArr[aI3]; dPosArr[d3 + 1] = vPosArr[aI3 + 1]; dPosArr[d3 + 2] = vPosArr[aI3 + 2];
+        continue;
+      }
+
+      let dotAlive = true;
+      let slowdown = 1;
+
+      // Dots progressively slow as lattice extends — stopped by BUILD_END
+      if (elapsed >= BUILD_START && elapsed < BUILD_END) {
+        const bP = (elapsed - BUILD_START) / (BUILD_END - BUILD_START);
+        // Cubic: fast at first, obviously slowing in second half, stopped at end
+        slowdown = Math.max(0, 1 - bP * bP * bP);
+      } else if (elapsed >= BUILD_END) {
+        slowdown = 0; // fully stopped
+      }
+
+      if (elapsed >= COLLAPSE_START) {
+        const cP    = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
+        const delay = (HEX_RINGS - edge.ring) / HEX_RINGS * 0.35;
+        const gT    = Math.max(0, (cP - delay) / (1 - delay));
+        if (gT >= 0.65) dotAlive = false;
+      }
+
+      if (!dotAlive) {
+        dColArr[d3] = dColArr[d3 + 1] = dColArr[d3 + 2] = 0;
+        continue;
+      }
+
+      // Accumulate position with dt — no jumps, smooth slowdown
+      dot.pos += dot.speed * slowdown * dt;
+      if (dot.pos > 1) dot.pos -= 1; // wrap smoothly
+
+      const t = dot.pos;
+
+      const ax = vPosArr[aI3], ay = vPosArr[aI3 + 1], az = vPosArr[aI3 + 2];
+      const bx = vPosArr[bI3], by = vPosArr[bI3 + 1], bz = vPosArr[bI3 + 2];
+
+      dPosArr[d3]     = ax + (bx - ax) * t;
+      dPosArr[d3 + 1] = ay + (by - ay) * t;
+      dPosArr[d3 + 2] = az + (bz - az) * t;
+
+      const dotBright = 0.8 * edge.radialFade;
+      dColArr[d3]     = DOT_COLOR.r * dotBright;
+      dColArr[d3 + 1] = DOT_COLOR.g * dotBright;
+      dColArr[d3 + 2] = DOT_COLOR.b * dotBright;
+    }
+
+    dGeo.attributes.position.needsUpdate = true;
+    dGeo.attributes.color.needsUpdate    = true;
+
+    // ── Visibility ──────────────────────────────────────────────────────
+    const show = anyVisible || elapsed < COLLAPSE_END;
+    vertexPoints.visible = show;
+    edgeLines.visible    = show;
+    dotMesh.visible      = show;
+
+    // ── Hero node dims during collapse ──────────────────────────────────
+    if (elapsed >= COLLAPSE_START && elapsed < COLLAPSE_END) {
+      const dimT = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
+      // Dims to ~0.6 as grid fails, then recovers in last 30%
+      if (dimT < 0.7) {
+        heroNode.mat.color.setHex(NODE_COLOR).multiplyScalar(1.0 - dimT * 0.6);
+      } else {
+        const rT = (dimT - 0.7) / 0.3;
+        heroNode.mat.color.setHex(NODE_COLOR).multiplyScalar(0.58 + rT * 0.42);
+      }
+    }
+
+    // ── After collapse: resting state ───────────────────────────────────
+    if (elapsed >= COLLAPSE_END && elapsed < OTHERS_REVEAL + 0.5) {
+      heroNode.mat.color.setHex(NODE_COLOR);
+      heroNode.mesh.scale.setScalar(1);
+    }
   }
-  if (t < STALL_END) {
-    // Stall: rapid irregular pulse + spike at peak
-    const stallFrac = (t - BUILD_END) / (STALL_END - BUILD_END);
-    const pulse     = Math.sin(t * 7 * Math.PI) * 0.8 * stallFrac;
-    heroNode.mat.emissiveIntensity = 3.2 + pulse;
-    return;
-  }
-  // Scatter: decay back to base
-  const decay = 1 - (t - STALL_END) / (SCATTER_END - STALL_END);
-  heroNode.mat.emissiveIntensity = 1.55 + 1.65 * decay;
-}
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-/**
- * @param {THREE.Group} globeGroup
- * @param {object}      heroNode — globe node with .position and .mat
- * @returns {{ update(t: number, dt: number, progress: number): void }}
- */
-export function createAct1Animations(globeGroup, heroNode) {
-  const heroPos = heroNode.position;
-  const frame   = tangentFrame(heroPos);
-  const tp      = makeTp(heroPos, frame);
-
-  const updateOrbital = buildOrbital(heroPos, frame, globeGroup);
-  const updateLattice = buildLattice(tp, globeGroup);
-
-  return {
-    update(t, _dt, progress) {
-      // Done once Beat 2 pull-back is established (p > 0.233 = 7 s)
-      if (progress > 0.233) return;
-
-      // act1Alpha: full through Beat 1, fades over t=5–7 s
-      const act1Alpha = progress < 0.167
-        ? 1.0
-        : Math.max(0, 1 - (progress - 0.167) / 0.066);
-
-      updateOrbital(t, act1Alpha);
-      updateLattice(t, act1Alpha);
-      updateHeroPulse(heroNode, t);
-    },
-  };
+  return { group, verts, edges, update };
 }

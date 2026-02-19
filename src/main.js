@@ -15,9 +15,11 @@ import { createGlobe }                from './globe.js';
 import { createClassicalConnections }  from './connections.js';
 import { createCameraController }      from './camera.js';
 import { createAct1Animations }        from './particles.js';
-import { createQuantumFailures }       from './quantum_fail.js';
-import { createCascade }               from './cascade.js';
-import { createVignettes }             from './vignettes.js';
+import { createInterconnect }          from './interconnect.js';
+// Future phases:
+// import { createQuantumFailures }       from './quantum_fail.js';
+// import { createCascade }               from './cascade.js';
+// import { createVignettes }             from './vignettes.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BG_COLOR = new THREE.Color(0x0d1520);
@@ -30,9 +32,8 @@ const scene = new THREE.Scene();
 scene.background = BG_COLOR;
 
 // ─── Lighting ─────────────────────────────────────────────────────────────────
-// Ambient only. The globe uses MeshBasicMaterial (ignores lights entirely).
-// Nodes use MeshStandardMaterial for emissive+bloom, but should look uniform —
-// directional lights are removed to prevent specular tinting varying per node.
+// Ambient light for any future MeshStandardMaterial usage.
+// Globe and nodes currently use MeshBasicMaterial (ignores lights).
 const ambientLight = new THREE.AmbientLight(0x1a2535, 0.9);
 scene.add(ambientLight);
 
@@ -63,29 +64,27 @@ composer.addPass(new RenderPass(scene, camera));
 
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.38,  // strength — slightly softer
-  0.28,  // radius  — tighter halo, reduces blurry spread
-  0.75,  // threshold — fires on bright emissive nodes
+  0.30,  // strength — subtle, warm
+  0.50,  // radius  — soft spread
+  0.85,  // threshold — only bright emissive nodes fire
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
 
 // ─── Scene modules ────────────────────────────────────────────────────────────
-const globe     = createGlobe(scene);
-const classical = createClassicalConnections(globe.globeGroup, globe.groundNodes);
-const act1      = createAct1Animations(globe.globeGroup, globe.heroNode);
-const qfail     = createQuantumFailures(
-  globe.globeGroup,
-  classical.curves,
-  classical.edgeList,
-  globe.groundNodes,
-);
-const cascade   = createCascade(globe.globeGroup, globe.nodes);
-const vignettes = createVignettes(globe.globeGroup, globe.nodes);
+const globe = createGlobe(scene, renderer);
+
+const classical = createClassicalConnections(globe.globeGroup, globe.clusters);
+const act1 = createAct1Animations(globe.globeGroup, globe.heroNode, globe.clusters);
+const interconnect = createInterconnect(globe.globeGroup, globe.clusters);
+// Future phases:
+// const cascade   = createCascade(globe.globeGroup, globe.nodes);
+// const vignettes = createVignettes(globe.globeGroup, globe.nodes);
 
 // ─── Camera controller ────────────────────────────────────────────────────────
 // Replaces the static position set above — controller owns camera movement.
-const cameraCtrl = createCameraController(camera);
+const waterlooCluster = globe.clusters.find(c => c.name === 'Waterloo');
+const cameraCtrl = createCameraController(camera, globe.heroNode.position, waterlooCluster.hub.position);
 
 // ─── Master timeline ──────────────────────────────────────────────────────────
 const timeline = new Timeline({ loop: false });
@@ -120,14 +119,14 @@ startScreen.addEventListener('click', () => {
 // ─── HTML overlay driver ──────────────────────────────────────────────────────
 // Drives CSS opacity on the two text overlays based on timeline windows.
 function updateOverlays() {
-  // "These machines cannot talk to each other." — Beat 2, ~9–10.5s
-  // Fade in 0.5s, hold 1.5s, fade out 0.5s
-  const act2TextIn  = timeline.window(9.0, 9.5);    // 0.5s fade-in
-  const act2TextOut = timeline.window(10.5, 11.0);  // 0.5s fade-out
+  // "These machines cannot talk to each other." — during regional hold ~22–23.5s
+  // Fade in 0.5s, hold 1s, fade out 0.5s
+  const act2TextIn  = timeline.window(22.0, 22.5);   // 0.5s fade-in
+  const act2TextOut = timeline.window(23.0, 23.5);   // 0.5s fade-out
   overlayAct2.style.opacity = (act2TextIn - act2TextOut).toFixed(3);
 
-  // UpScale wordmark — fades in at 28.5s into Final beat
-  const wordmarkIn = timeline.window(28.5, 30.0);   // 1.5s fade-in
+  // UpScale wordmark — fades in at ~28s in Final beat
+  const wordmarkIn = timeline.window(28.0, 29.0);    // 1s fade-in
   overlayWordmark.style.opacity = wordmarkIn.toFixed(3);
 }
 
@@ -146,11 +145,12 @@ function animate() {
 
   // Update scene modules
   globe.update(timeline.t, dt, timeline.progress);
-  classical.update(timeline.t, dt, timeline.progress);
-  act1.update(timeline.t, dt, timeline.progress);
-  qfail.update(timeline.t, dt);
-  cascade.update(timeline.t, dt);
-  vignettes.update(timeline.t, dt);
+  classical.update(timeline.t, dt);
+  act1.update(timeline.t, dt);
+  interconnect.update(timeline.t, dt);
+  // Future phases:
+  // cascade.update(timeline.t, dt);
+  // vignettes.update(timeline.t, dt);
   cameraCtrl.update(timeline.progress);
 
   // Drive HTML overlays

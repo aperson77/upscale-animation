@@ -1,129 +1,175 @@
 /**
  * camera.js — Keyframed camera path for the 30s animation.
  *
- * Two-phase movement:
- *  - Beat 1 (p 0–0.167):  Extreme close-up on Waterloo.  Camera STATIC.
- *  - Beat 2 (p 0.167–0.300): Slow pullback to Ontario triangle view.
- *  - Hold   (p 0.300–1.000): Static hold on Ontario triangle; wordmark at 28.5s.
- *
- * Position uses normalized-lerp (nlerp): direction and radius interpolated
- * separately so the camera arcs smoothly around the globe.
+ * Staged zoom-out: intimate Waterloo → regional Ontario/Quebec → national Canada → Arctic.
+ * Uses CatmullRomCurve3 splines for buttery smooth position + lookAt interpolation.
+ * Slow rotation in the final hold (25-30s).
  */
 
 import * as THREE from 'three';
 import { GLOBE_RADIUS, latLonToVec3 } from './globe.js';
-import { ease }                        from './timing.js';
 
-// ─── Hero node (Waterloo) ─────────────────────────────────────────────────────
-const HERO_POS = latLonToVec3(43.46, -80.52, GLOBE_RADIUS);
-const HERO_DIR = HERO_POS.clone().normalize();
-const TORONTO_POS = latLonToVec3(43.65, -79.38, GLOBE_RADIUS);
-const OTTAWA_POS  = latLonToVec3(45.42, -75.69, GLOBE_RADIUS);
+// ─── Key geographic positions ────────────────────────────────────────────────
+const WATERLOO = latLonToVec3(43.46, -80.52, GLOBE_RADIUS);
+const OTTAWA   = latLonToVec3(45.42, -75.69, GLOBE_RADIUS);
+const MONTREAL = latLonToVec3(45.50, -73.57, GLOBE_RADIUS);
 
-// ─── Beat 1 camera — tight above Waterloo ────────────────────────────────────
-const A1_POS = HERO_DIR.clone().multiplyScalar(GLOBE_RADIUS + 0.06);
+// Ontario/Quebec midpoint
+const REGIONAL_LOOK = WATERLOO.clone().add(OTTAWA).add(MONTREAL).multiplyScalar(1 / 3);
+const REGIONAL_DIR  = REGIONAL_LOOK.clone().normalize();
 
-// ─── LookAt targets ───────────────────────────────────────────────────────────
-const ONTARIO_LOOK = HERO_POS.clone()
-  .add(TORONTO_POS)
-  .add(OTTAWA_POS)
-  .multiplyScalar(1 / 3);
+// Canada center
+const CANADA_CENTER = latLonToVec3(56, -96, GLOBE_RADIUS);
+const CANADA_DIR    = CANADA_CENTER.clone().normalize();
 
-// ─── Ontario hold position ────────────────────────────────────────────────────
-const ONTARIO_DIR   = ONTARIO_LOOK.clone().normalize();
-const ONTARIO_RIGHT = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), ONTARIO_DIR).normalize();
-const ONTARIO_UP    = new THREE.Vector3().crossVectors(ONTARIO_DIR, ONTARIO_RIGHT).normalize();
-const ONTARIO_MAP_UP = new THREE.Vector3(0, 1, 0).projectOnPlane(ONTARIO_DIR).normalize();
-// Telephoto: far away + narrow FOV → flattens globe into map-like view
-const ONTARIO_POS   = ONTARIO_DIR.clone()
-  .multiplyScalar(GLOBE_RADIUS + 0.28);
+// Canada + Arctic
+const ARCTIC_CENTER = latLonToVec3(60, -96, GLOBE_RADIUS);
+const ARCTIC_DIR    = ARCTIC_CENTER.clone().normalize();
 
-// FOV transitions: Beat 1 uses default 50°, Ontario hold uses narrow FOV
-const BEAT1_FOV    = 50;
-const ONTARIO_FOV  = 18;
+// ─── Helper ──────────────────────────────────────────────────────────────────
+function camPos(dir, dist) {
+  return dir.clone().normalize().multiplyScalar(dist);
+}
 
-// ─── Keyframe table ───────────────────────────────────────────────────────────
-const KF = [
-  // ── Beat 1 (0–5s): static close-up on Waterloo ───────────────────────────
-  { p: 0.000, pos: A1_POS.clone(),    look: HERO_POS.clone(),       fn: ease.inOutCubic },
-  { p: 0.167, pos: A1_POS.clone(),    look: HERO_POS.clone(),       fn: ease.inOutQuint }, //  5s — smooth exit
+// ─── Build spline curves from keyframes ──────────────────────────────────────
+function buildTimedSpline(keyframes, accessor) {
+  const SAMPLES = 300;
+  const points = [];
 
-  // ── Beat 2 (5–9s): gradual Ontario reveal ────────────────────────────────
-  { p: 0.315, pos: ONTARIO_POS.clone(), look: ONTARIO_LOOK.clone(), fn: ease.inOutQuint }, // softer, slightly longer settle
+  for (let i = 0; i <= SAMPLES; i++) {
+    const elapsed = (i / SAMPLES) * 30;
 
-  // ── Hold (9–30s): static on Ontario triangle; wordmark at 28.5s ──────────
-  { p: 1.000, pos: ONTARIO_POS.clone(), look: ONTARIO_LOOK.clone(), fn: ease.inOutCubic }, // 30s — hold
-];
-
-// ─── Reusable vectors ─────────────────────────────────────────────────────────
-const _camPos = new THREE.Vector3();
-const _lookAt = new THREE.Vector3();
-const _dirLo  = new THREE.Vector3();
-const _dirHi  = new THREE.Vector3();
-const _upBlend = new THREE.Vector3();
-
-// ─── createCameraController ───────────────────────────────────────────────────
-export function createCameraController(camera) {
-  function upBlendForProgress(p) {
-    const upT = THREE.MathUtils.clamp((p - 0.167) / 0.05, 0, 1);
-    return _upBlend.copy(new THREE.Vector3(0, 1, 0)).lerp(ONTARIO_MAP_UP, upT).normalize();
-  }
-
-  function update(progress) {
-    const p = Math.max(0, Math.min(1, progress));
-
-    // Beat 1 hard-lock — zero drift.
-    if (p <= 0.167) {
-      camera.fov = BEAT1_FOV;
-      camera.updateProjectionMatrix();
-      camera.up.copy(upBlendForProgress(p));
-      camera.position.copy(A1_POS);
-      camera.lookAt(HERO_POS);
-      return;
-    }
-
-    // Find surrounding keyframes
-    let lo = KF[0];
-    let hi = KF[KF.length - 1];
-
-    for (let i = 0; i < KF.length - 1; i++) {
-      if (p >= KF[i].p && p <= KF[i + 1].p) {
-        lo = KF[i];
-        hi = KF[i + 1];
+    let lo = keyframes[0];
+    let hi = keyframes[keyframes.length - 1];
+    for (let k = 0; k < keyframes.length - 1; k++) {
+      if (elapsed >= keyframes[k].t && elapsed <= keyframes[k + 1].t) {
+        lo = keyframes[k];
+        hi = keyframes[k + 1];
         break;
       }
     }
 
-    if (lo === hi || hi.p === lo.p) {
-      camera.up.copy(upBlendForProgress(p));
-      camera.position.copy(hi.pos);
-      camera.lookAt(hi.look);
-      return;
+    let t = 0;
+    if (hi.t !== lo.t) {
+      const raw = (elapsed - lo.t) / (hi.t - lo.t);
+      t = raw < 0.5
+        ? 16 * raw * raw * raw * raw * raw
+        : 1 - Math.pow(-2 * raw + 2, 5) / 2;
     }
 
-    const rawT   = (p - lo.p) / (hi.p - lo.p);
-    const easedT = lo.fn(rawT);
+    const a = accessor(lo);
+    const b = accessor(hi);
+    const rA = a.length();
+    const rB = b.length();
+    const r = rA + (rB - rA) * t;
+    const dir = new THREE.Vector3().lerpVectors(
+      a.clone().normalize(),
+      b.clone().normalize(),
+      t,
+    ).normalize().multiplyScalar(r);
 
-    // Nlerp: arc the camera around the globe rather than cutting through space.
-    const rLo = lo.pos.length();
-    const rHi = hi.pos.length();
-    const r   = rLo + (rHi - rLo) * easedT;
+    points.push(dir);
+  }
 
-    _dirLo.copy(lo.pos).normalize();
-    _dirHi.copy(hi.pos).normalize();
-    _camPos.lerpVectors(_dirLo, _dirHi, easedT).normalize().multiplyScalar(r);
+  return new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.25);
+}
 
-    _lookAt.lerpVectors(lo.look, hi.look, easedT);
+// ─── FOV spline (smooth) ────────────────────────────────────────────────────
+function getFOV(elapsed) {
+  if (elapsed <= 9.5) return 24;
+  if (elapsed <= 11) {
+    // Transition: Single node → 3-node view (9.5-11s)
+    const raw = (elapsed - 9.5) / 1.5;
+    const t = raw < 0.5 ? 16 * raw ** 5 : 1 - Math.pow(-2 * raw + 2, 5) / 2;
+    return 24 + (32 - 24) * t;
+  }
+  if (elapsed <= 20.5) return 32;
+  if (elapsed <= 22) {
+    // Transition: Waterloo 3-node → Regional (20.5-22s)
+    const raw = (elapsed - 20.5) / 1.5;
+    const t = raw < 0.5 ? 16 * raw ** 5 : 1 - Math.pow(-2 * raw + 2, 5) / 2;
+    return 32 + (25 - 32) * t;
+  }
+  if (elapsed <= 23.5) return 25;
+  if (elapsed <= 25) {
+    // Transition: Regional → National (23.5-25s)
+    const raw = (elapsed - 23.5) / 1.5;
+    const t = raw < 0.5 ? 16 * raw ** 5 : 1 - Math.pow(-2 * raw + 2, 5) / 2;
+    return 25 + (16 - 25) * t;
+  }
+  if (elapsed <= 26.5) return 16;
+  if (elapsed <= 28) {
+    // Transition: National → Full view (26.5-28s)
+    const raw = (elapsed - 26.5) / 1.5;
+    const t = raw < 0.5 ? 16 * raw ** 5 : 1 - Math.pow(-2 * raw + 2, 5) / 2;
+    return 16 + (14 - 16) * t;
+  }
+  return 14;
+}
 
-    // Interpolate FOV: Beat 1 (50°) → Ontario hold (18°) during pullback
-    const fovT = THREE.MathUtils.clamp((p - 0.167) / (0.315 - 0.167), 0, 1);
-    const fovEased = fovT * fovT * (3 - 2 * fovT); // smoothstep
-    camera.fov = BEAT1_FOV + (ONTARIO_FOV - BEAT1_FOV) * fovEased;
+// ─── Reusable vectors ────────────────────────────────────────────────────────
+const _pos  = new THREE.Vector3();
+const _look = new THREE.Vector3();
+const _axis = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+
+// ─── createCameraController ──────────────────────────────────────────────────
+// heroNodePos: the actual world position of the hero node (Vector3)
+// hubPos: the Waterloo hub position — center of 3-node view (Vector3)
+export function createCameraController(camera, heroNodePos, hubPos) {
+
+  // Use the hero node's real position for Scene 1 targeting
+  const heroDir  = heroNodePos.clone().normalize();
+  const heroLook = heroNodePos.clone();
+
+  // Hub is the center of the 3-node cluster
+  const hubDir  = hubPos.clone().normalize();
+  const hubLook = hubPos.clone();
+
+  // ── Keyframe table ──────────────────────────────────────────────────────
+  const KF = [
+    // Scene 1a: Single node close-up (0-9.5s) — hero node fills frame
+    { t:  0,   pos: camPos(heroDir, 2.06),     look: heroLook.clone()       },
+    { t:  9.5, pos: camPos(heroDir, 2.06),     look: heroLook.clone()       },
+    // Scene 1b: Pull back to reveal 3 Waterloo nodes (9.5-11s) — center on hub
+    { t: 11,   pos: camPos(hubDir, 2.08),      look: hubLook.clone()        },
+    // Hold on Waterloo cluster through grey lines, failed pulse, interconnect (11-20.5s)
+    { t: 20.5, pos: camPos(hubDir, 2.08),      look: hubLook.clone()        },
+    // Scene 2: Regional Ontario/Quebec (22-23.5s) — HOLD steady
+    { t: 22,   pos: camPos(REGIONAL_DIR, 2.5), look: REGIONAL_LOOK.clone()  },
+    { t: 23.5, pos: camPos(REGIONAL_DIR, 2.5), look: REGIONAL_LOOK.clone()  },
+    // Scene 3: National Canada (25-26.5s) — HOLD steady
+    { t: 25,   pos: camPos(CANADA_DIR, 5.0),   look: CANADA_CENTER.clone()  },
+    { t: 26.5, pos: camPos(CANADA_DIR, 5.0),   look: CANADA_CENTER.clone()  },
+    // Scene 4: Full view + Arctic (28-30s) — HOLD steady
+    { t: 28,   pos: camPos(ARCTIC_DIR, 6.0),   look: ARCTIC_CENTER.clone()  },
+    { t: 29,   pos: camPos(ARCTIC_DIR, 6.0),   look: ARCTIC_CENTER.clone()  },
+    { t: 30,   pos: camPos(ARCTIC_DIR, 6.0),   look: ARCTIC_CENTER.clone()  },
+  ];
+
+  const posCurve  = buildTimedSpline(KF, kf => kf.pos);
+  const lookCurve = buildTimedSpline(KF, kf => kf.look);
+
+  function update(progress) {
+    const p = Math.max(0, Math.min(1, progress));
+
+    posCurve.getPoint(p, _pos);
+    lookCurve.getPoint(p, _look);
+
+    // Slow rotation in final hold (28-30s): ~5° total
+    const elapsed = p * 30;
+    if (elapsed > 28) {
+      const rotT = (elapsed - 28) / 2;
+      const angle = rotT * (5 * Math.PI / 180);
+      _axis.copy(ARCTIC_DIR).normalize();
+      _quat.setFromAxisAngle(_axis, angle);
+      _pos.applyQuaternion(_quat);
+    }
+
+    camera.fov = getFOV(elapsed);
     camera.updateProjectionMatrix();
-
-    camera.up.copy(upBlendForProgress(p));
-    camera.position.copy(_camPos);
-    camera.lookAt(_lookAt);
+    camera.position.copy(_pos);
+    camera.lookAt(_look);
   }
 
   return { update };
