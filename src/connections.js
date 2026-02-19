@@ -1,47 +1,61 @@
 /**
  * connections.js
- * Classical telecom fiber — grey great-circle arcs between cluster HUBS,
- * with small grey particles flowing along them.
- * These represent existing infrastructure and stay visible permanently.
+ * Blue hub-to-hub great-circle arcs between clusters, with traveling
+ * light pulses. These represent telecom fibers connecting the locations
+ * and only appear after each location completes its gold interconnect.
  */
 
 import * as THREE from 'three';
-import { GLOBE_RADIUS } from './globe.js';
+// globe.js no longer needed — arc endpoints use actual hub positions
 
-const LINE_COLOR     = 0xa0aab9;
-const LINE_OPACITY   = 0.25;
-const PARTICLE_COLOR = 0xa0aab9;
+// ─── Colors ─────────────────────────────────────────────────────────────────
+const TUBE_COLOR    = 0x4488cc;
+const TUBE_OPACITY  = 0.30;
+const GLOW_COLOR_R  = 0.35;
+const GLOW_COLOR_G  = 0.60;
+const GLOW_COLOR_B  = 1.00;
 
-const ARC_SEGMENTS       = 64;
-const PARTICLES_PER_EDGE = 4;
-const PARTICLE_RADIUS    = 0.002;
-const PARTICLE_SPEED     = 0.08; // traversals per second
-const ARC_BASE_LIFT      = 0.05; // base elevation above globe surface
+// ─── Geometry ───────────────────────────────────────────────────────────────
+const ARC_SEGMENTS   = 64;
+const TUBE_RADIUS    = 0.0008;
+const ARC_BASE_LIFT  = 0.05;
 
-// ─── Edge definitions ────────────────────────────────────────────────────────
-// Edges connect cluster hubs by cluster name. revealT = when they become visible.
+// ─── Glow overlay ───────────────────────────────────────────────────────────
+const GLOW_TUBULAR        = 64;
+const GLOW_RADIAL         = 6;
+const GLOW_VERTS_PER_RING = GLOW_RADIAL + 1;
+const GLOW_TRAIL          = 0.10;   // length of the bright pulse head
+const GLOW_BRIGHT_DRAW    = 6.0;    // brightness during draw phase
+const GLOW_BRIGHT_FLOW    = 4.0;    // brightness for flowing pulses
+const DRAW_SPEED          = 0.8;    // seconds to draw the full arc
+const PULSE_SPEED         = 0.20;   // traversals per second for flowing pulses
+const PULSE_COUNT         = 2;      // number of flowing pulses per edge
+
+// ─── Edge definitions ──────────────────────────────────────────────────────
 const EDGE_DEFS = [
-  { from: 'Waterloo',    to: 'Ottawa',     revealT: 22   },
-  { from: 'Ottawa',      to: 'Montréal',   revealT: 22   },
-  { from: 'Waterloo',    to: 'Calgary',    revealT: 25   },
-  { from: 'Calgary',     to: 'Vancouver',  revealT: 25   },
-  { from: 'Yellowknife', to: 'Inuvik',     revealT: 28   },
+  { from: 'Waterloo',    to: 'Ottawa',     revealT: 28.5 },
+  { from: 'Ottawa',      to: 'Montréal',   revealT: 28.5 },
+  { from: 'Waterloo',    to: 'Calgary',    revealT: 33.5 },
+  { from: 'Calgary',     to: 'Vancouver',  revealT: 33.5 },
+  { from: 'Yellowknife', to: 'Inuvik',     revealT: 33.5 },
 ];
 
-// ─── Great-circle arc ────────────────────────────────────────────────────────
+// ─── Great-circle arc ──────────────────────────────────────────────────────
 function arcPoints(a, b, segments = ARC_SEGMENTS) {
   const dirA = a.clone().normalize();
   const dirB = b.clone().normalize();
+  const rA = a.length();  // actual hub radius
+  const rB = b.length();
 
-  // Longer arcs rise higher — compute angular distance
   const angDist = dirA.angleTo(dirB);
-  const maxLift = ARC_BASE_LIFT + angDist * 0.12; // longer arcs get more lift
+  const maxLift = ARC_BASE_LIFT + angDist * 0.12;
 
   const pts = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const lift = 4 * t * (1 - t); // parabolic: 0 at endpoints, 1 at midpoint
-    const r = GLOBE_RADIUS + ARC_BASE_LIFT + maxLift * lift;
+    const lift = 4 * t * (1 - t);  // 0 at endpoints, 1 at midpoint
+    const baseR = rA + (rB - rA) * t;
+    const r = baseR + maxLift * lift;
     pts.push(
       new THREE.Vector3().lerpVectors(dirA, dirB, t).normalize().multiplyScalar(r),
     );
@@ -49,17 +63,17 @@ function arcPoints(a, b, segments = ARC_SEGMENTS) {
   return pts;
 }
 
-// ─── createClassicalConnections ──────────────────────────────────────────────
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+// ─── createClassicalConnections ────────────────────────────────────────────
 export function createClassicalConnections(globeGroup, clusters) {
   const group = new THREE.Group();
   globeGroup.add(group);
 
-  // Build a name→cluster lookup
   const clusterMap = {};
   for (const c of clusters) clusterMap[c.name] = c;
 
   const edges = [];
-  const _pt = new THREE.Vector3();
 
   for (const def of EDGE_DEFS) {
     const cA = clusterMap[def.from];
@@ -68,13 +82,13 @@ export function createClassicalConnections(globeGroup, clusters) {
 
     const hubA = cA.hub.position;
     const hubB = cB.hub.position;
-    const pts = arcPoints(hubA, hubB);
+    const pts  = arcPoints(hubA, hubB);
     const curve = new THREE.CatmullRomCurve3(pts);
 
-    // ── Line mesh — TubeGeometry for smooth thin tube ─────────────────────
-    const tubeGeo = new THREE.TubeGeometry(curve, ARC_SEGMENTS, 0.002, 6, false);
+    // ── Base tube ───────────────────────────────────────────────────────
+    const tubeGeo = new THREE.TubeGeometry(curve, ARC_SEGMENTS, TUBE_RADIUS, 6, false);
     const tubeMat = new THREE.MeshBasicMaterial({
-      color:       LINE_COLOR,
+      color:       TUBE_COLOR,
       transparent: true,
       opacity:     0,
       depthWrite:  false,
@@ -83,58 +97,116 @@ export function createClassicalConnections(globeGroup, clusters) {
     tubeMesh.visible = false;
     group.add(tubeMesh);
 
-    // ── Flowing particles ─────────────────────────────────────────────────
-    const particles = [];
-    for (let p = 0; p < PARTICLES_PER_EDGE; p++) {
-      const pMat = new THREE.MeshBasicMaterial({
-        color:       PARTICLE_COLOR,
-        transparent: true,
-        opacity:     0,
-      });
-      const pMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(PARTICLE_RADIUS, 8, 6),
-        pMat,
-      );
-      pMesh.visible = false;
-      group.add(pMesh);
-      particles.push({
-        mesh: pMesh,
-        mat:  pMat,
-        progress: p / PARTICLES_PER_EDGE, // evenly spaced
-        speed: PARTICLE_SPEED + (Math.random() - 0.5) * 0.02,
-      });
-    }
+    const totalIndices = tubeGeo.index
+      ? tubeGeo.index.count
+      : tubeGeo.attributes.position.count;
+
+    // ── Glow overlay tube — per-vertex colored light pulses ─────────────
+    const glowGeo = new THREE.TubeGeometry(curve, GLOW_TUBULAR, TUBE_RADIUS * 1.2, GLOW_RADIAL, false);
+    const glowColors = new Float32Array(glowGeo.attributes.position.count * 3);
+    glowGeo.setAttribute('color', new THREE.BufferAttribute(glowColors, 3));
+    const glowMat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent:  true,
+      blending:     THREE.AdditiveBlending,
+      depthWrite:   false,
+      depthTest:    false,
+    });
+    const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+    glowMesh.renderOrder = 10;
+    glowMesh.visible = false;
+    group.add(glowMesh);
 
     edges.push({
-      def,
-      curve,
-      tubeMesh,
-      tubeMat,
-      particles,
+      def, curve,
+      tubeMesh, tubeMat, tubeGeo, totalIndices,
+      glowMesh, glowGeo, glowColors,
       revealT: def.revealT,
+      drawn: false,
+      drawnT: 0,
+      flowAccum: 0,
     });
   }
 
-  // ── Update ──────────────────────────────────────────────────────────────
-  const FADE_DUR = 1.5;
-
+  // ── Update ────────────────────────────────────────────────────────────
   function update(elapsed, dt) {
     for (const edge of edges) {
-      const fade = Math.min(Math.max((elapsed - edge.revealT) / FADE_DUR, 0), 1);
+      if (elapsed < edge.revealT) continue;
 
-      edge.tubeMesh.visible = fade > 0;
-      edge.tubeMat.opacity = LINE_OPACITY * fade;
+      const age = elapsed - edge.revealT;
 
-      for (const p of edge.particles) {
-        p.mesh.visible = fade > 0;
-        p.mat.opacity = 0.3 * fade;
+      // ── Draw phase: tube extends along arc ─────────────────────────
+      const drawT = Math.min(age / DRAW_SPEED, 1);
+      const drawE = easeOutCubic(drawT);
 
-        if (fade > 0) {
-          p.progress = (p.progress + p.speed * dt) % 1;
-          edge.curve.getPoint(p.progress, _pt);
-          p.mesh.position.copy(_pt);
+      edge.tubeMesh.visible = true;
+      edge.tubeMat.opacity  = TUBE_OPACITY;
+
+      if (edge.tubeGeo.index) {
+        edge.tubeGeo.index.count = Math.floor(drawE * edge.totalIndices);
+      } else {
+        edge.tubeGeo.setDrawRange(0, Math.floor(drawE * edge.totalIndices));
+      }
+
+      if (drawT >= 1 && !edge.drawn) {
+        edge.drawn  = true;
+        edge.drawnT = elapsed;
+      }
+
+      // ── Glow: traveling light ──────────────────────────────────────
+      edge.glowMesh.visible = true;
+      const colors = edge.glowColors;
+
+      if (!edge.drawn) {
+        // During draw: single bright head at the draw front
+        for (let ring = 0; ring <= GLOW_TUBULAR; ring++) {
+          const t = ring / GLOW_TUBULAR;
+          let bright = 0;
+
+          if (t <= drawE) {
+            const dist = drawE - t;
+            if (dist < GLOW_TRAIL) {
+              bright = Math.pow(1 - dist / GLOW_TRAIL, 2) * GLOW_BRIGHT_DRAW;
+            }
+          }
+
+          for (let r = 0; r < GLOW_VERTS_PER_RING; r++) {
+            const i3 = (ring * GLOW_VERTS_PER_RING + r) * 3;
+            colors[i3]     = bright * GLOW_COLOR_R;
+            colors[i3 + 1] = bright * GLOW_COLOR_G;
+            colors[i3 + 2] = bright * GLOW_COLOR_B;
+          }
+        }
+      } else {
+        // After drawn: multiple flowing pulses (flowAccum survives timeline end)
+        edge.flowAccum += dt;
+
+        for (let ring = 0; ring <= GLOW_TUBULAR; ring++) {
+          const t = ring / GLOW_TUBULAR;
+          let bright = 0;
+
+          for (let pi = 0; pi < PULSE_COUNT; pi++) {
+            const offset = pi / PULSE_COUNT;
+            const pulsePos = (edge.flowAccum * PULSE_SPEED + offset) % 1;
+            const dist = Math.abs(t - pulsePos);
+            const wrapDist = Math.min(dist, 1 - dist); // wrap-around
+
+            if (wrapDist < GLOW_TRAIL) {
+              const b = Math.pow(1 - wrapDist / GLOW_TRAIL, 2) * GLOW_BRIGHT_FLOW;
+              bright = Math.max(bright, b);
+            }
+          }
+
+          for (let r = 0; r < GLOW_VERTS_PER_RING; r++) {
+            const i3 = (ring * GLOW_VERTS_PER_RING + r) * 3;
+            colors[i3]     = bright * GLOW_COLOR_R;
+            colors[i3 + 1] = bright * GLOW_COLOR_G;
+            colors[i3 + 2] = bright * GLOW_COLOR_B;
+          }
         }
       }
+
+      edge.glowGeo.attributes.color.needsUpdate = true;
     }
   }
 

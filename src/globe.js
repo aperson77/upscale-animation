@@ -37,33 +37,33 @@ export function latLonToVec3(lat, lon, r = GLOBE_RADIUS) {
 const CLUSTERS = [
   // Southern Canada
   { name: 'Waterloo',      lat: 43.46, lon: -80.52,  count: 3, isHero: true,  revealT: 0    },
-  { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 2, isHero: false, revealT: 22   },
-  { name: 'Montréal',      lat: 45.50, lon: -73.57,  count: 3, isHero: false, revealT: 22   },
-  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 25   },
-  { name: 'Vancouver',     lat: 49.28, lon:-123.12,  count: 2, isHero: false, revealT: 25.4 },
+  { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 2, isHero: false, revealT: 25.5, spacing: 0.010 },
+  { name: 'Montréal',      lat: 45.50, lon: -73.57,  count: 3, isHero: false, revealT: 25.5 },
+  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 31.5, spacing: 0.010 },
+  { name: 'Vancouver',     lat: 49.25, lon:-123.00,  count: 2, isHero: false, revealT: 31.9, spacing: 0.010 },
   // Arctic ground stations
-  { name: 'Iqaluit',       lat: 63.75, lon: -68.52,  count: 2, isHero: false, revealT: 28   },
-  { name: 'Yellowknife',   lat: 62.45, lon:-114.37,  count: 2, isHero: false, revealT: 28   },
-  { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 1, isHero: false, revealT: 28   },
-  { name: 'Alert',         lat: 82.50, lon: -62.35,  count: 1, isHero: false, revealT: 28   },
-  { name: 'Cambridge Bay', lat: 69.12, lon:-105.05,  count: 1, isHero: false, revealT: 28   },
-  { name: 'Churchill',     lat: 58.77, lon: -94.17,  count: 1, isHero: false, revealT: 28   },
+  { name: 'Iqaluit',       lat: 63.76, lon: -68.50,  count: 2, isHero: false, revealT: 31.5, spacing: 0.010 },
+  { name: 'Yellowknife',   lat: 62.47, lon:-114.40,  count: 2, isHero: false, revealT: 31.5, spacing: 0.010 },
+  { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 1, isHero: false, revealT: 31.5 },
+  { name: 'Alert',         lat: 82.50, lon: -62.35,  count: 1, isHero: false, revealT: 31.5 },
+  { name: 'Cambridge Bay', lat: 69.12, lon:-105.05,  count: 1, isHero: false, revealT: 31.5 },
+  { name: 'Churchill',     lat: 58.77, lon: -94.17,  count: 1, isHero: false, revealT: 31.5 },
 ];
 
 // Satellite nodes — polar/high-inclination orbits over northern Canada
 // Radius 2.8–3.2 (globe is 2). Slow orbital animation applied in update().
 const SATELLITES = [
-  { name: 'Sat-Polar',     lat: 72, lon: -96,  radius: 3.0, revealT: 28   },
-  { name: 'Sat-West',      lat: 65, lon:-130,  radius: 2.9, revealT: 28   },
-  { name: 'Sat-East',      lat: 70, lon: -60,  radius: 3.1, revealT: 28   },
-  { name: 'Sat-High',      lat: 78, lon: -95,  radius: 2.8, revealT: 28   },
+  { name: 'Sat-Polar',     lat: 72, lon: -96,  radius: 3.0, revealT: 31.5 },
+  { name: 'Sat-West',      lat: 65, lon:-130,  radius: 2.9, revealT: 31.5 },
+  { name: 'Sat-East',      lat: 70, lon: -60,  radius: 3.1, revealT: 31.5 },
+  { name: 'Sat-High',      lat: 78, lon: -95,  radius: 2.8, revealT: 31.5 },
 ];
 
 // Drone relay nodes — intermediate altitude, filling Arctic gaps
 const DRONES = [
-  { name: 'Drone-YK-Inuvik', lat: 65, lon:-124,  radius: 2.35, revealT: 28   },
-  { name: 'Drone-Hudson',    lat: 61, lon: -88,  radius: 2.40, revealT: 28   },
-  { name: 'Drone-Baffin',    lat: 66, lon: -75,  radius: 2.30, revealT: 28   },
+  { name: 'Drone-YK-Inuvik', lat: 65, lon:-124,  radius: 2.35, revealT: 31.5 },
+  { name: 'Drone-Hudson',    lat: 61, lon: -88,  radius: 2.40, revealT: 31.5 },
+  { name: 'Drone-Baffin',    lat: 66, lon: -75,  radius: 2.30, revealT: 31.5 },
 ];
 
 // ─── Cluster layout ───────────────────────────────────────────────────────────
@@ -2142,7 +2142,7 @@ export function createGlobe(scene, renderer) {
   for (let ci = 0; ci < CLUSTERS.length; ci++) {
     const data = CLUSTERS[ci];
     const centerPos = latLonToVec3(data.lat, data.lon);
-    const positions = layoutCluster(centerPos, data.count);
+    const positions = layoutCluster(centerPos, data.count, data.spacing);
 
     const clusterNodes = [];
 
@@ -2381,8 +2381,8 @@ export function createGlobe(scene, renderer) {
         }
       }
 
-      // Slow orbital drift for satellites and drones
-      if (node.isSatellite || node.isDrone) {
+      // Slow orbital drift for satellites and drones (frozen when Arctic connects)
+      if ((node.isSatellite || node.isDrone) && !node.orbitFrozen) {
         const speed = node.isSatellite ? SAT_ORBIT_SPEED : DRONE_ORBIT_SPEED;
         node.orbitalLon += speed * dt;
         const newPos = latLonToVec3(node.lat, node.orbitalLon, node.orbitalRadius);
@@ -2419,7 +2419,7 @@ export function createGlobe(scene, renderer) {
 
         // Halo pulses inversely (brighter when node dims slightly, for glow effect)
         if (node.haloMat) {
-          const baseHaloOp = node.isDrone ? 0.10 : 0.12;
+          const baseHaloOp = node.haloBoost ? 0.4 : (node.isDrone ? 0.10 : 0.12);
           node.haloMat.opacity = baseHaloOp * (0.7 + 0.3 * sinVal);
         }
       }
@@ -2437,7 +2437,7 @@ export function createGlobe(scene, renderer) {
       if (hub.active) {
         // Active: copper glow, gentle pulse synced with cluster
         hub.mat.color.lerp(_copperColor, 8.0 * dt);
-        hub.mat.opacity += (0.8 - hub.mat.opacity) * 4.0 * dt;
+        hub.mat.opacity += (1.0 - hub.mat.opacity) * 4.0 * dt;
         const refPhase = cluster.nodes[0] ? cluster.nodes[0].phase : 0;
         const hubPulse = 1 + 0.06 * Math.sin(refPhase);
         hub.mesh.scale.setScalar(hubPulse);

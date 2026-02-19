@@ -16,10 +16,7 @@ import { createClassicalConnections }  from './connections.js';
 import { createCameraController }      from './camera.js';
 import { createAct1Animations }        from './particles.js';
 import { createInterconnect }          from './interconnect.js';
-// Future phases:
-// import { createQuantumFailures }       from './quantum_fail.js';
-// import { createCascade }               from './cascade.js';
-// import { createVignettes }             from './vignettes.js';
+import { createArcticActivation }      from './arctic.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BG_COLOR = new THREE.Color(0x0d1520);
@@ -77,9 +74,7 @@ const globe = createGlobe(scene, renderer);
 const classical = createClassicalConnections(globe.globeGroup, globe.clusters);
 const act1 = createAct1Animations(globe.globeGroup, globe.heroNode, globe.clusters);
 const interconnect = createInterconnect(globe.globeGroup, globe.clusters);
-// Future phases:
-// const cascade   = createCascade(globe.globeGroup, globe.nodes);
-// const vignettes = createVignettes(globe.globeGroup, globe.nodes);
+const arctic = createArcticActivation(globe.globeGroup, globe.clusters, globe.satelliteNodes, globe.droneNodes);
 
 // ─── Camera controller ────────────────────────────────────────────────────────
 // Replaces the static position set above — controller owns camera movement.
@@ -94,7 +89,6 @@ const timeline = new Timeline({ loop: false });
 window.__timeline = timeline;
 
 // ─── HTML overlay references ──────────────────────────────────────────────────
-const overlayAct2    = document.getElementById('text-act2');
 const overlayWordmark = document.getElementById('wordmark');
 
 // ─── Resize ───────────────────────────────────────────────────────────────────
@@ -117,16 +111,9 @@ startScreen.addEventListener('click', () => {
 }, { once: true });
 
 // ─── HTML overlay driver ──────────────────────────────────────────────────────
-// Drives CSS opacity on the two text overlays based on timeline windows.
 function updateOverlays() {
-  // "These machines cannot talk to each other." — during regional hold ~22–23.5s
-  // Fade in 0.5s, hold 1s, fade out 0.5s
-  const act2TextIn  = timeline.window(22.0, 22.5);   // 0.5s fade-in
-  const act2TextOut = timeline.window(23.0, 23.5);   // 0.5s fade-out
-  overlayAct2.style.opacity = (act2TextIn - act2TextOut).toFixed(3);
-
-  // UpScale wordmark — fades in at ~28s in Final beat
-  const wordmarkIn = timeline.window(28.0, 29.0);    // 1s fade-in
+  // UpScale wordmark — fades in at the end over full Arctic network
+  const wordmarkIn = timeline.window(34.0, 35.0);    // 1s fade-in
   overlayWordmark.style.opacity = wordmarkIn.toFixed(3);
 }
 
@@ -148,10 +135,8 @@ function animate() {
   classical.update(timeline.t, dt);
   act1.update(timeline.t, dt);
   interconnect.update(timeline.t, dt);
-  // Future phases:
-  // cascade.update(timeline.t, dt);
-  // vignettes.update(timeline.t, dt);
-  cameraCtrl.update(timeline.progress);
+  arctic.update(timeline.t, dt);
+  cameraCtrl.update(timeline.t);
 
   // Drive HTML overlays
   updateOverlays();

@@ -10,7 +10,7 @@
  *   BEAT2   5 000 – 10 000   Local Interconnect — Waterloo's 3 nodes link + lattice payoff
  *   BEAT3  10 000 – 16 000   Isolated Subnets — zoom out, quantum dissolution, text
  *   BEAT4  16 000 – 25 000   The Network — local interconnects everywhere, subnet cascade
- *   FINAL  25 000 – 30 000   Stillness + capability flashes + wordmark
+ *   FINAL  25 000 – 35 000   3-location interconnect + Arctic cascade + wordmark
  */
 
 // ─── Phase table ─────────────────────────────────────────────────────────────
@@ -19,10 +19,10 @@ export const PHASES = Object.freeze({
   BEAT2: { start:  5_000, end: 10_000 },
   BEAT3: { start: 10_000, end: 16_000 },
   BEAT4: { start: 16_000, end: 25_000 },
-  FINAL: { start: 25_000, end: 30_000 },
+  FINAL: { start: 25_000, end: 35_000 },
 });
 
-export const TOTAL_DURATION = 30_000; // ms
+export const TOTAL_DURATION = 35_000; // ms
 
 // ─── Easing functions ─────────────────────────────────────────────────────────
 // All take t ∈ [0, 1] and return a value ∈ [0, 1].
