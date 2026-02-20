@@ -91,6 +91,71 @@ window.__timeline = timeline;
 // ─── HTML overlay references ──────────────────────────────────────────────────
 const overlayWordmark = document.getElementById('wordmark');
 
+// ─── Capability pulse (38.5s) ────────────────────────────────────────────────
+// All visible nodes emit a synchronized expanding ring of light.
+// Fires after all space arcs complete (~37.9s)
+const PULSE_T   = 54.0;
+const PULSE_DUR = 0.5;
+let pulseRings  = null;
+let pulseFired  = false;
+
+function initPulseRings() {
+  pulseRings = [];
+  const ringGeo = new THREE.RingGeometry(0.002, 0.003, 32);
+
+  // Collect all node positions (ground clusters + satellites + drones)
+  const allNodes = [];
+  for (const c of globe.clusters) {
+    for (const n of c.nodes) allNodes.push(n);
+  }
+  for (const s of globe.satelliteNodes) allNodes.push(s);
+  for (const d of globe.droneNodes) allNodes.push(d);
+
+  for (const node of allNodes) {
+    if (!node.mesh || !node.mesh.visible) continue; // skip unrevealed nodes
+    const pos = node.mesh.position; // use current mesh position (accounts for orbital drift)
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 1.0,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo.clone(), mat);
+    ring.position.copy(pos);
+    ring.lookAt(pos.clone().multiplyScalar(2)); // face outward
+    ring.visible = false;
+    globe.globeGroup.add(ring);
+    pulseRings.push({ mesh: ring, mat });
+  }
+}
+
+function updatePulse(elapsed) {
+  if (elapsed < PULSE_T) return;
+
+  if (!pulseFired) {
+    initPulseRings();
+    pulseFired = true;
+  }
+
+  const age = elapsed - PULSE_T;
+  if (age > PULSE_DUR) {
+    for (const pr of pulseRings) pr.mesh.visible = false;
+    return;
+  }
+
+  const t = age / PULSE_DUR;
+  const scale = 1 + t * 5;    // expand to ~5x
+  const opacity = 1 - t * t;  // quadratic fade
+
+  for (const pr of pulseRings) {
+    pr.mesh.visible = true;
+    pr.mesh.scale.setScalar(scale);
+    pr.mat.opacity = opacity;
+  }
+}
+
 // ─── Resize ───────────────────────────────────────────────────────────────────
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -112,8 +177,8 @@ startScreen.addEventListener('click', () => {
 
 // ─── HTML overlay driver ──────────────────────────────────────────────────────
 function updateOverlays() {
-  // UpScale wordmark — fades in at the end over full Arctic network
-  const wordmarkIn = timeline.window(34.0, 35.0);    // 1s fade-in
+  // UpScale wordmark — fades in after capability pulse
+  const wordmarkIn = timeline.window(56.0, 57.0);    // 1s fade-in
   overlayWordmark.style.opacity = wordmarkIn.toFixed(3);
 }
 
@@ -137,6 +202,14 @@ function animate() {
   interconnect.update(timeline.t, dt);
   arctic.update(timeline.t, dt);
   cameraCtrl.update(timeline.t);
+
+  // Capability pulse — synchronized ring burst at 54s
+  updatePulse(timeline.t);
+
+  // Globe rotation during global shot (Shot 4) — gentle eastward, ~1°/s (0.017 rad/s)
+  if (timeline.t >= 52.0) {
+    globe.globeGroup.rotation.y += 0.017 * dt;
+  }
 
   // Drive HTML overlays
   updateOverlays();

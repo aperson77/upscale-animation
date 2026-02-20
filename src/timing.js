@@ -5,12 +5,15 @@
  * beat animations, and text overlays. All other modules receive either the
  * raw elapsed seconds or the clamped phase-progress values exposed here.
  *
- * Beat boundaries (all in milliseconds):
+ * Phase boundaries (all in milliseconds):
  *   BEAT1      0 –  5 000   One Machine — close-up Waterloo, lattice attempt fails
  *   BEAT2   5 000 – 10 000   Local Interconnect — Waterloo's 3 nodes link + lattice payoff
  *   BEAT3  10 000 – 16 000   Isolated Subnets — zoom out, quantum dissolution, text
  *   BEAT4  16 000 – 25 000   The Network — local interconnects everywhere, subnet cascade
- *   FINAL  25 000 – 35 000   3-location interconnect + Arctic cascade + wordmark
+ *   SHOT1  25 000 – 33 000   Southern Canada — Waterloo/Ottawa/Montreal connections
+ *   SHOT2  35 000 – 43 000   Whole Canada — all ground clusters + connections
+ *   SHOT3  45 000 – 50 000   Satellite — dedicated satellite connection shot
+ *   SHOT4  52 000 – 60 000   Global — rotating globe, satellite orbiting freely
  */
 
 // ─── Phase table ─────────────────────────────────────────────────────────────
@@ -19,10 +22,13 @@ export const PHASES = Object.freeze({
   BEAT2: { start:  5_000, end: 10_000 },
   BEAT3: { start: 10_000, end: 16_000 },
   BEAT4: { start: 16_000, end: 25_000 },
-  FINAL: { start: 25_000, end: 35_000 },
+  SHOT1: { start: 25_000, end: 33_000 },
+  SHOT2: { start: 35_000, end: 43_000 },
+  SHOT3: { start: 45_000, end: 50_000 },
+  SHOT4: { start: 52_000, end: 60_000 },
 });
 
-export const TOTAL_DURATION = 35_000; // ms
+export const TOTAL_DURATION = 60_000; // ms
 
 // ─── Easing functions ─────────────────────────────────────────────────────────
 // All take t ∈ [0, 1] and return a value ∈ [0, 1].
@@ -83,7 +89,7 @@ export class Timeline {
   /** Elapsed time in milliseconds (0 → TOTAL_DURATION). */
   get ms() { return this._elapsed; }
 
-  /** Elapsed time in seconds (0 → 30). */
+  /** Elapsed time in seconds (0 → 60). */
   get t() { return this._elapsed / 1000; }
 
   /** Overall animation progress, 0 → 1. */
@@ -112,7 +118,10 @@ export class Timeline {
   get beat2() { return this.phase('BEAT2'); }
   get beat3() { return this.phase('BEAT3'); }
   get beat4() { return this.phase('BEAT4'); }
-  get final() { return this.phase('FINAL'); }
+  get shot1() { return this.phase('SHOT1'); }
+  get shot2() { return this.phase('SHOT2'); }
+  get shot3() { return this.phase('SHOT3'); }
+  get shot4() { return this.phase('SHOT4'); }
 
   /**
    * Returns the name of the currently active phase.
@@ -121,7 +130,7 @@ export class Timeline {
     for (const [name, { start, end }] of Object.entries(PHASES)) {
       if (this._elapsed >= start && this._elapsed < end) return name;
     }
-    return this._elapsed >= TOTAL_DURATION ? 'FINAL' : null;
+    return this._elapsed >= TOTAL_DURATION ? 'SHOT4' : null;
   }
 
   // ── Sub-range helper ────────────────────────────────────────────────────────

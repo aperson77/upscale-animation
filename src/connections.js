@@ -33,11 +33,14 @@ const PULSE_COUNT         = 2;      // number of flowing pulses per edge
 
 // ─── Edge definitions ──────────────────────────────────────────────────────
 const EDGE_DEFS = [
-  { from: 'Waterloo',    to: 'Ottawa',     revealT: 28.5 },
-  { from: 'Ottawa',      to: 'Montréal',   revealT: 28.5 },
-  { from: 'Waterloo',    to: 'Calgary',    revealT: 33.5 },
-  { from: 'Calgary',     to: 'Vancouver',  revealT: 33.5 },
-  { from: 'Yellowknife', to: 'Inuvik',     revealT: 33.5 },
+  // Shot 1a — eastern fiber
+  { from: 'Waterloo',    to: 'Ottawa',       revealT: 28.5 },
+  { from: 'Ottawa',      to: 'Montréal',     revealT: 28.5 },
+  // Shot 1b — western fiber
+  { from: 'Waterloo',    to: 'Calgary',      revealT: 31.0 },
+  { from: 'Calgary',     to: 'Vancouver',    revealT: 31.0 },
+  // Shot 2 — Arctic fiber (Yellowknife↔Inuvik only; other Arctic via satellite)
+  { from: 'Yellowknife',   to: 'Inuvik',       revealT: 38.0 },
 ];
 
 // ─── Great-circle arc ──────────────────────────────────────────────────────

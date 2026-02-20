@@ -39,32 +39,28 @@ const CLUSTERS = [
   { name: 'Waterloo',      lat: 43.46, lon: -80.52,  count: 3, isHero: true,  revealT: 0    },
   { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 2, isHero: false, revealT: 25.5, spacing: 0.010 },
   { name: 'Montréal',      lat: 45.50, lon: -73.57,  count: 3, isHero: false, revealT: 25.5 },
-  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 31.5, spacing: 0.010 },
-  { name: 'Vancouver',     lat: 49.25, lon:-123.00,  count: 2, isHero: false, revealT: 31.9, spacing: 0.010 },
-  // Arctic ground stations
-  { name: 'Iqaluit',       lat: 63.76, lon: -68.50,  count: 2, isHero: false, revealT: 31.5, spacing: 0.010 },
-  { name: 'Yellowknife',   lat: 62.47, lon:-114.40,  count: 2, isHero: false, revealT: 31.5, spacing: 0.010 },
-  { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 1, isHero: false, revealT: 31.5 },
-  { name: 'Alert',         lat: 82.50, lon: -62.35,  count: 1, isHero: false, revealT: 31.5 },
-  { name: 'Cambridge Bay', lat: 69.12, lon:-105.05,  count: 1, isHero: false, revealT: 31.5 },
-  { name: 'Churchill',     lat: 58.77, lon: -94.17,  count: 1, isHero: false, revealT: 31.5 },
+  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 29.5, spacing: 0.010 },
+  { name: 'Vancouver',     lat: 49.30, lon:-122.20,  count: 2, isHero: false, revealT: 29.5, spacing: 0.010 },
+  // Arctic ground stations — all coordinates pushed well inland to avoid water on globe texture
+  { name: 'Iqaluit',       lat: 66.00, lon: -68.50,  count: 2, isHero: false, revealT: 35.0, spacing: 0.010 },
+  { name: 'Yellowknife',   lat: 64.00, lon:-113.50,  count: 2, isHero: false, revealT: 35.0, spacing: 0.010 },
+  { name: 'Inuvik',        lat: 67.00, lon:-132.50,  count: 1, isHero: false, revealT: 35.0 },
+  { name: 'Alert',         lat: 80.00, lon: -72.00,  count: 1, isHero: false, revealT: 35.0 },
+  { name: 'Cambridge Bay', lat: 70.50, lon:-107.00,  count: 1, isHero: false, revealT: 35.0 },
+  { name: 'Churchill',     lat: 58.50, lon: -96.50,  count: 1, isHero: false, revealT: 35.0 },
 ];
 
-// Satellite nodes — polar/high-inclination orbits over northern Canada
-// Radius 2.8–3.2 (globe is 2). Slow orbital animation applied in update().
+// Satellite node — polar orbit over Canada (great-circle through the poles)
+// orbitLon: longitude where the orbit crosses the equator (defines the orbital plane)
+// startAngleDeg: orbital angle at reveal time (0° = equator, 90° = north pole)
+//   ~55° puts the satellite over central Canada at reveal
+// radius: orbital altitude above globe center (GLOBE_RADIUS = 2, so 3.5 = 75% above surface)
 const SATELLITES = [
-  { name: 'Sat-Polar',     lat: 72, lon: -96,  radius: 3.0, revealT: 31.5 },
-  { name: 'Sat-West',      lat: 65, lon:-130,  radius: 2.9, revealT: 31.5 },
-  { name: 'Sat-East',      lat: 70, lon: -60,  radius: 3.1, revealT: 31.5 },
-  { name: 'Sat-High',      lat: 78, lon: -95,  radius: 2.8, revealT: 31.5 },
+  { name: 'Sat-Polar', orbitLon: -100, startAngleDeg: 55, radius: 3.5, revealT: 45.0 },
 ];
 
-// Drone relay nodes — intermediate altitude, filling Arctic gaps
-const DRONES = [
-  { name: 'Drone-YK-Inuvik', lat: 65, lon:-124,  radius: 2.35, revealT: 31.5 },
-  { name: 'Drone-Hudson',    lat: 61, lon: -88,  radius: 2.40, revealT: 31.5 },
-  { name: 'Drone-Baffin',    lat: 66, lon: -75,  radius: 2.30, revealT: 31.5 },
-];
+// No drone relay nodes — satellite bridges south↔north directly
+const DRONES = [];
 
 // ─── Cluster layout ───────────────────────────────────────────────────────────
 // Places `count` nodes on the tangent plane at `center`, spaced apart.
@@ -2136,6 +2132,13 @@ export function createGlobe(scene, renderer) {
   // ── 2. Build node clusters ────────────────────────────────────────────────
   const nodeGeo  = new THREE.SphereGeometry(NODE_RADIUS, 32, 24);
   const glowGeo  = new THREE.SphereGeometry(NODE_RADIUS * 1.3, 16, 12);
+
+  // Satellite-specific geometry — much larger so it's visible at globe-shot distance
+  // At camera distance 7.5, NODE_RADIUS (0.0024) is ~3 pixels — invisible.
+  // 5x core (0.012) ≈ 14 pixels, 12x glow (0.029) ≈ 34 pixels — clearly visible.
+  const satNodeGeo = new THREE.SphereGeometry(NODE_RADIUS * 5, 32, 24);
+  const satGlowGeo = new THREE.SphereGeometry(NODE_RADIUS * 12, 16, 12);
+
   const nodes    = [];
   const clusters = [];
 
@@ -2244,37 +2247,51 @@ export function createGlobe(scene, renderer) {
     });
   }
 
-  // ── 3. Satellite nodes ────────────────────────────────────────────────────
+  // ── 3. Satellite nodes — great-circle polar orbit ─────────────────────────
+  // Each satellite orbits in a plane through the poles. The orbital plane
+  // crosses the equator at `orbitLon`. We precompute the orbit axis and
+  // reference direction so the per-frame update is just one axis-angle rotation.
   const satelliteNodes = [];
   for (const sat of SATELLITES) {
-    const position = latLonToVec3(sat.lat, sat.lon, sat.radius);
+    // Orbital plane: contains Y-axis (poles) and equatorial direction at orbitLon
+    const equatorialRef = latLonToVec3(0, sat.orbitLon, 1.0).normalize();
+    const orbitAxis     = new THREE.Vector3().crossVectors(equatorialRef, new THREE.Vector3(0, 1, 0)).normalize();
 
+    // Initial position at startAngleDeg along the great circle
+    const startAngle = (sat.startAngleDeg * Math.PI) / 180;
+    const position   = equatorialRef.clone()
+      .applyAxisAngle(orbitAxis, startAngle)
+      .multiplyScalar(sat.radius);
+
+    // Larger core mesh — visible at globe-shot distance
     const mat = new THREE.MeshBasicMaterial({
       color:       new THREE.Color(COLOR_BLUE_NODE),
       transparent: true,
       opacity:     1.0,
     });
-
-    const mesh = new THREE.Mesh(nodeGeo, mat);
+    const mesh = new THREE.Mesh(satNodeGeo, mat);
     mesh.position.copy(position);
-    mesh.visible = false; // hidden until Beat 4
+    mesh.visible = false;
     globeGroup.add(mesh);
 
+    // Bright additive glow halo — makes satellite pop against dark sky
     const haloMat = new THREE.MeshBasicMaterial({
       color:       COLOR_BLUE_NODE,
       transparent: true,
-      opacity:     0.12,
+      opacity:     0.25,
       depthWrite:  false,
       side:        THREE.BackSide,
+      blending:    THREE.AdditiveBlending,
     });
-    mesh.add(new THREE.Mesh(glowGeo, haloMat));
+    mesh.add(new THREE.Mesh(satGlowGeo, haloMat));
 
     const node = {
       name:        sat.name,
-      lat:         sat.lat,
-      lon:         sat.lon,
       orbitalRadius: sat.radius,
-      orbitalLon:    sat.lon, // current longitude — animated slowly
+      // Great-circle orbit state
+      orbitAxis:     orbitAxis.clone(),
+      orbitRef:      equatorialRef.clone(),
+      orbitalAngle:  startAngle,
       clusterId:   -1,
       clusterName: sat.name,
       position:    position.clone(),
@@ -2361,8 +2378,7 @@ export function createGlobe(scene, renderer) {
 
   // ── Update called each frame ─────────────────────────────────────────────
   const SYNC_LERP_RATE    = 3.0;   // phase converges in ~0.8s
-  const SAT_ORBIT_SPEED   = 0.8;   // degrees/second orbital drift
-  const DRONE_ORBIT_SPEED = 0.3;   // slower drift for drones
+  const SAT_ORBIT_SPEED   = 1.0;   // degrees/second along great-circle polar orbit
   const _copperColor = new THREE.Color(COLOR_COPPER);
   const _baseBlue    = new THREE.Color(COLOR_BLUE_NODE);
   const _dimBlue     = new THREE.Color(COLOR_BLUE_NODE).multiplyScalar(0.3);
@@ -2377,15 +2393,17 @@ export function createGlobe(scene, renderer) {
         node.mesh.visible = fade > 0;
         if (fade > 0) {
           node.mat.opacity = fade;
-          if (node.haloMat) node.haloMat.opacity = (node.isDrone ? 0.10 : 0.12) * fade;
+          if (node.haloMat) node.haloMat.opacity = (node.isDrone ? 0.10 : node.isSatellite ? 0.25 : 0.12) * fade;
         }
       }
 
-      // Slow orbital drift for satellites and drones (frozen when Arctic connects)
-      if ((node.isSatellite || node.isDrone) && !node.orbitFrozen) {
-        const speed = node.isSatellite ? SAT_ORBIT_SPEED : DRONE_ORBIT_SPEED;
-        node.orbitalLon += speed * dt;
-        const newPos = latLonToVec3(node.lat, node.orbitalLon, node.orbitalRadius);
+      // Great-circle polar orbit — satellite moves along a true orbital arc
+      // Only orbit after reveal to prevent drift while invisible
+      if (node.isSatellite && !node.orbitFrozen && elapsed >= node.revealT) {
+        node.orbitalAngle += (SAT_ORBIT_SPEED * Math.PI / 180) * dt;
+        const newPos = node.orbitRef.clone()
+          .applyAxisAngle(node.orbitAxis, node.orbitalAngle)
+          .multiplyScalar(node.orbitalRadius);
         node.mesh.position.copy(newPos);
         node.position.copy(newPos);
       }
@@ -2419,7 +2437,7 @@ export function createGlobe(scene, renderer) {
 
         // Halo pulses inversely (brighter when node dims slightly, for glow effect)
         if (node.haloMat) {
-          const baseHaloOp = node.haloBoost ? 0.4 : (node.isDrone ? 0.10 : 0.12);
+          const baseHaloOp = node.haloBoost ? 0.4 : (node.isDrone ? 0.10 : node.isSatellite ? 0.25 : 0.12);
           node.haloMat.opacity = baseHaloOp * (0.7 + 0.3 * sinVal);
         }
       }
