@@ -38,7 +38,7 @@ export function createVignettes(globeGroup, nodes) {
 
   // ── V1: Distributed Computing ─────────────────────────────────────────────
   // 16 particle points fly inward toward Waterloo suggesting assembly
-  const V1_START = 22.5, V1_END = 24.5;
+  const V1_START = 24.5, V1_END = 26.5;
   const V1_SYNC  = ['Waterloo', 'Toronto', 'Ottawa'];
   const heroPos  = get('Waterloo')?.position.clone() ?? new THREE.Vector3();
 
@@ -62,7 +62,7 @@ export function createVignettes(globeGroup, nodes) {
   const v1Cur = v1Start.map(p => p.clone());
 
   // ── V2: Unbreakable Encryption ────────────────────────────────────────────
-  const V2_START = 24.0, V2_END = 26.5;
+  const V2_START = 26.0, V2_END = 28.5;
   const v2From   = get('Waterloo')?.position ?? new THREE.Vector3();
   const v2To     = get('Toronto')?.position  ?? new THREE.Vector3();
   const v2Curve  = new THREE.CatmullRomCurve3(arcPoints(v2From, v2To));
@@ -93,7 +93,7 @@ export function createVignettes(globeGroup, nodes) {
   globeGroup.add(v2Rip);
 
   // ── V3: GPS-Free Timing ───────────────────────────────────────────────────
-  const V3_START  = 25.5, V3_END = 27.5;
+  const V3_START  = 27.5, V3_END = 29.5;
   const V3_NAMES  = ['Waterloo', 'Toronto', 'Ottawa'];
   const V3_RINGS  = 3;
   const V3_GAP    = 0.45; // delay between successive rings per node
@@ -114,7 +114,7 @@ export function createVignettes(globeGroup, nodes) {
   }
 
   // ── V4: Networked Sensing ─────────────────────────────────────────────────
-  const V4_START = 26.5, V4_END = 29.0;
+  const V4_START = 28.5, V4_END = 31.0;
   const v4Ctr    = get('Waterloo')?.position.clone() ?? new THREE.Vector3();
   const v4N      = 40;
   const v4Buf    = new Float32Array(v4N * 3);

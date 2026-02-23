@@ -21,20 +21,10 @@ const COPPER_GRID   = new THREE.Color(0.83, 0.63, 0.29);
 const COPPER_VERT   = new THREE.Color(0.95, 0.75, 0.35);
 const COPPER_DOT    = new THREE.Color(1.0, 0.85, 0.45);
 
-const GREY_LINE_COLOR   = 0x606060;
-const GREY_LINE_OPACITY = 1.0;
-
-// ─── Pre-interconnect: grey lines + failed pulse (Waterloo only) ─────────
-const GREY_LINES_START    = 11.0;
-const GREY_LINES_FADE_DUR = 1.2;
-const GREY_LINES_END      = 14.5;
-const FAILED_PULSE_START  = 12.5;
-const FAILED_PULSE_DUR    = 1.8;
-
 // ─── Default timing constants ──────────────────────────────────────────────
 const DEFAULT_CONN_DRAW_DUR = 0.8;
 const DEFAULT_FLOW_SPEED    = 0.8;
-const DEFAULT_HEX_RINGS     = 8;
+const DEFAULT_GRID_HALF     = 5;
 
 const LATTICE_BUILD_DUR = 1.0;
 const LATTICE_HOLD_DUR  = 1.5;
@@ -49,15 +39,17 @@ const GLOW_VERTS_PER_RING = GLOW_RADIAL + 1;
 const GLOW_TRAIL    = 0.06;
 const GLOW_BRIGHT   = 6.0;
 const FLOW_BRIGHT   = 3.0;
-const NODE_SIDE_OFFSET = 0.0026;
-const HUB_SIDE_OFFSET  = 0.0012;
+const NODE_SIDE_OFFSET = 0.0024;  // exactly NODE_RADIUS — tube starts at node surface
+const HUB_SIDE_OFFSET  = 0.0012;  // between hex center and edge — tube visually meets the edge
 const COLOR_TRANSITION_DUR = 0.5;
+const ENTANGLE_TRANSITION_DUR = 0.8; // copper → bright yellow after entanglement
+const ENTANGLED_COLOR = new THREE.Color(0xffe066); // lighter brighter yellow
 const _blueColor = new THREE.Color(COLOR_BLUE_NODE);
 const _lerpColor = new THREE.Color();
 
 // ─── Lattice config ──────────────────────────────────────────────────────────
-const HEX_SPACING = 0.002;
-const VERT_SIZE   = 0.0012;
+const GRID_SPACING = 0.002;
+const VERT_SIZE    = 0.0012;
 
 // ─── Wave config ─────────────────────────────────────────────────────────────
 const WAVE_SPEED     = 0.022;
@@ -71,8 +63,8 @@ const DOT_SIZE  = 0.0018;
 const DOT_COLOR = new THREE.Color(1.0, 0.85, 0.50);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-function hexDist(q, r) { return Math.max(Math.abs(q), Math.abs(r), Math.abs(q + r)); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+function gridDist(col, row) { return Math.max(Math.abs(col), Math.abs(row)); }
 
 function createCircleTexture() {
   const size = 64;
@@ -103,45 +95,43 @@ function buildClusterIC(group, cluster, config, circleTex) {
     connStarts,
     connDrawDur   = DEFAULT_CONN_DRAW_DUR,
     flowSpeed     = DEFAULT_FLOW_SPEED,
-    hexRings      = DEFAULT_HEX_RINGS,
+    hexRings      = DEFAULT_GRID_HALF,
     latticeBuildDur = LATTICE_BUILD_DUR,
     latticeHoldDur  = LATTICE_HOLD_DUR,
     latticeFadeDur  = LATTICE_FADE_DUR,
+    skipLattice   = false,
   } = config;
 
   // Set hub reveal time so globe.js fades it in at ignition
   cluster.hubRevealT = ignitionT;
 
-  // ── Build node→hub connections ──────────────────────────────────────────
+  // ── Build connections (node → hexagon, all at once) ──
   const connections = [];
 
-  for (let i = 0; i < nodes.length && i < connStarts.length; i++) {
+  for (let i = 0; i < nodes.length; i++) {
     const node    = nodes[i];
     const nodePos = node.position.clone();
-    const startT  = connStarts[i];
 
-    const toNode  = new THREE.Vector3().subVectors(nodePos, hubPos);
-    const dir     = toNode.clone().normalize();
-    const tubeDist = toNode.length();
-    const startPos = hubPos.clone().addScaledVector(dir, HUB_SIDE_OFFSET);
-    const endPos   = hubPos.clone().addScaledVector(dir, tubeDist - NODE_SIDE_OFFSET);
-    const curve    = new THREE.LineCurve3(startPos, endPos);
+    // Direct line from node surface to hub edge along the real direction between them
+    const toHub    = new THREE.Vector3().subVectors(hubPos, nodePos);
+    const dir      = toHub.clone().normalize();
+    const nodeEnd  = nodePos.clone().addScaledVector(dir, NODE_SIDE_OFFSET);
+    const hubEnd   = hubPos.clone().addScaledVector(dir, -HUB_SIDE_OFFSET);
 
-    // Tube
-    const tubeGeo = new THREE.TubeGeometry(curve, TUBE_SEGMENTS, TUBE_RADIUS, 8, false);
+    // Single tube: grows from node toward hexagon
+    const tubeCurve = new THREE.LineCurve3(nodeEnd, hubEnd);
+    const tubeGeo = new THREE.TubeGeometry(tubeCurve, TUBE_SEGMENTS, TUBE_RADIUS, 8, false);
     const tubeMat = new THREE.MeshBasicMaterial({
       color: COPPER, transparent: true, opacity: 0, depthWrite: false,
     });
     const tubeMesh = new THREE.Mesh(tubeGeo, tubeMat);
     tubeMesh.visible = false;
     group.add(tubeMesh);
+    const tubeTotal = tubeGeo.index
+      ? tubeGeo.index.count : tubeGeo.attributes.position.count;
 
-    const totalIndices = tubeGeo.index
-      ? tubeGeo.index.count
-      : tubeGeo.attributes.position.count;
-
-    // Glow overlay — per-vertex colored traveling light
-    const glowGeo = new THREE.TubeGeometry(curve, GLOW_TUBULAR, TUBE_RADIUS, GLOW_RADIAL, false);
+    // Glow overlay — same curve for traveling light after connection
+    const glowGeo = new THREE.TubeGeometry(tubeCurve, GLOW_TUBULAR, TUBE_RADIUS, GLOW_RADIAL, false);
     const glowColors = new Float32Array(glowGeo.attributes.position.count * 3);
     glowGeo.setAttribute('color', new THREE.BufferAttribute(glowColors, 3));
     const glowMat = new THREE.MeshBasicMaterial({
@@ -154,11 +144,10 @@ function buildClusterIC(group, cluster, config, circleTex) {
     group.add(glowMesh);
 
     connections.push({
-      node, nodePos, curve,
-      tubeMesh, tubeMat, tubeGeo,
-      totalIndices,
+      node, nodePos, curve: tubeCurve,
+      tubeMesh, tubeMat, tubeGeo, tubeTotal,
       glowMesh, glowGeo, glowColors,
-      startT,
+      startT: ignitionT,
       activated: false,
       drawn: false,
       drawnT: 0,
@@ -176,9 +165,103 @@ function buildClusterIC(group, cluster, config, circleTex) {
   let lattHoldEnd    = Infinity;
   let lattFadeEnd    = Infinity;
 
-  // ── Build success lattice (hex grid centered on hub) ──────────────────
-  const maxRadius = hexRings * HEX_SPACING;
-  const fadeStart = maxRadius * 0.5;
+  // ── Build success lattice (rectangular grid centered on hub) ─────────
+  // skipLattice: only build tubes + pulses, no lattice grid
+  if (skipLattice) {
+    function update(elapsed, dt) {
+      if (elapsed < ignitionT) return;
+      if (!hub.active) hub.active = true;
+
+      for (let ci = 0; ci < connections.length; ci++) {
+        const conn = connections[ci];
+        if (elapsed < conn.startT) continue;
+        const drawAge = elapsed - conn.startT;
+        const drawT   = Math.min(drawAge / connDrawDur, 1);
+        const drawE   = easeInOutCubic(drawT);
+        conn.tubeMesh.visible = true;
+        conn.tubeMat.opacity  = 0.8;
+        if (conn.tubeGeo.index) {
+          conn.tubeGeo.index.count = Math.floor(drawE * conn.tubeTotal);
+        } else {
+          conn.tubeGeo.setDrawRange(0, Math.floor(drawE * conn.tubeTotal));
+        }
+        if (drawT >= 1 && !conn.drawn) {
+          conn.drawn  = true;
+          conn.drawnT = elapsed;
+        }
+        if (conn.drawn) {
+          const colorT = Math.min((elapsed - conn.drawnT) / COLOR_TRANSITION_DUR, 1);
+          _lerpColor.copy(_blueColor).lerp(COPPER_COLOR, colorT);
+          conn.node.baseColor = _lerpColor.clone();
+        }
+      }
+
+      if (!allConnected && connections.every(c => c.drawn)) {
+        allConnected  = true;
+        allConnectedT = elapsed;
+        cluster.clusterSynced = true;
+        cluster.clusterSyncStartT = elapsed;
+        cluster.leadPhase = nodes[0].phase;
+        for (const node of nodes) {
+          node.baseEmissive = 1.0;
+          node.clusterSynced = true;
+        }
+      }
+
+      if (allConnected) {
+        flowAccum += dt;
+        const sinceAll = elapsed - allConnectedT;
+        const entangleT = Math.min(sinceAll / ENTANGLE_TRANSITION_DUR, 1);
+        const entangleE = entangleT * entangleT * (3 - 2 * entangleT);
+        _lerpColor.copy(COPPER_COLOR).lerp(ENTANGLED_COLOR, entangleE);
+        for (const conn of connections) conn.tubeMat.color.copy(_lerpColor);
+        hub.mat.color.copy(_lerpColor);
+        for (const node of nodes) node.baseColor.copy(COPPER_COLOR).lerp(ENTANGLED_COLOR, entangleE);
+
+        const pulsePos = (flowAccum * flowSpeed) % 1;
+        const pulseAtHub = pulsePos > (1 - GLOW_TRAIL);
+        if (pulseAtHub) {
+          hub.mat.opacity = Math.min(1.0, hub.mat.opacity + 2.0 * dt);
+          const hubProximity = (pulsePos - (1 - GLOW_TRAIL)) / GLOW_TRAIL;
+          const hubBright = 1.0 + hubProximity * 0.6;
+          hub.mesh.scale.setScalar(1.0 + (hubBright - 1.0) * 0.03);
+        }
+
+        const FADE_ZONE = 0.15;
+        let endpointFade = 1;
+        if (pulsePos < FADE_ZONE) endpointFade = pulsePos / FADE_ZONE;
+        else if (pulsePos > (1 - FADE_ZONE)) endpointFade = (1 - pulsePos) / FADE_ZONE;
+
+        const glowR = 0.95 + entangleE * 0.05;
+        const glowG = 0.75 + entangleE * 0.13;
+        const glowB = 0.35 + entangleE * 0.05;
+        for (const conn of connections) {
+          conn.glowMesh.visible = true;
+          const colors = conn.glowColors;
+          for (let ring = 0; ring <= GLOW_TUBULAR; ring++) {
+            const t = ring / GLOW_TUBULAR;
+            let bright = 0;
+            const dist = Math.abs(t - pulsePos);
+            if (dist < GLOW_TRAIL) {
+              bright = Math.pow(1 - dist / GLOW_TRAIL, 2) * FLOW_BRIGHT * endpointFade;
+            }
+            for (let r = 0; r < GLOW_VERTS_PER_RING; r++) {
+              const i3 = (ring * GLOW_VERTS_PER_RING + r) * 3;
+              colors[i3]     = bright * glowR;
+              colors[i3 + 1] = bright * glowG;
+              colors[i3 + 2] = bright * glowB;
+            }
+          }
+          conn.glowGeo.attributes.color.needsUpdate = true;
+        }
+      }
+    }
+    return { connections, update };
+  }
+
+  const gridHalf  = hexRings;
+  const maxRadius = gridHalf * GRID_SPACING;
+  const gaussSigma = maxRadius * 0.55;
 
   const hubNormal   = hubPos.clone().normalize();
   const hubTangent  = new THREE.Vector3()
@@ -193,67 +276,44 @@ function buildClusterIC(group, cluster, config, circleTex) {
       .addScaledVector(hubNormal, h);
   }
 
-  // Project node positions onto hub tangent plane to get "source directions"
-  const nodeAngles = nodes.map(n => {
-    const rel = n.position.clone().sub(hubPos);
-    const tx = rel.dot(hubTangent);
-    const ty = rel.dot(hubBitangent);
-    return Math.atan2(ty, tx);
-  });
-
-  // Generate hex vertices
+  // Generate rectangular grid vertices
   const verts   = [];
   const vertMap = new Map();
 
-  for (let q = -hexRings; q <= hexRings; q++) {
-    for (let r = -hexRings; r <= hexRings; r++) {
-      const ring = hexDist(q, r);
-      if (ring > hexRings) continue;
-
-      const x    = HEX_SPACING * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);
-      const y    = HEX_SPACING * (1.5 * r);
+  for (let row = -gridHalf; row <= gridHalf; row++) {
+    for (let col = -gridHalf; col <= gridHalf; col++) {
+      const x    = col * GRID_SPACING;
+      const y    = row * GRID_SPACING;
       const dist = Math.sqrt(x * x + y * y);
+      const ring = gridDist(col, row);
       const h    = 0.003 + ring * 0.0002;
 
-      const radialFade = dist <= fadeStart
-        ? 1
-        : Math.max(0, 1 - (dist - fadeStart) / (maxRadius - fadeStart));
-
-      const angle = Math.atan2(y, x);
-      let nearestNode = 0;
-      let bestAngleDiff = Infinity;
-      for (let ni = 0; ni < nodeAngles.length; ni++) {
-        let diff = Math.abs(angle - nodeAngles[ni]);
-        if (diff > Math.PI) diff = 2 * Math.PI - diff;
-        if (diff < bestAngleDiff) {
-          bestAngleDiff = diff;
-          nearestNode = ni;
-        }
-      }
+      // Gaussian fade: bright at center, smooth fall-off at edges
+      const radialFade = Math.exp(-(dist * dist) / (2 * gaussSigma * gaussSigma));
 
       const revealDelay = (dist / maxRadius) * 0.7;
 
       const idx = verts.length;
-      vertMap.set(`${q},${r}`, idx);
+      vertMap.set(`${col},${row}`, idx);
       verts.push({
-        idx, q, r, ring, dist,
+        idx, col, row, ring, dist,
         baseX: x, baseY: y, h,
         worldPos: toHubWorld(x, y, h),
         radialFade,
-        sourceNode: nearestNode,
         revealDelay,
+        pulsePhase: (col * 2.7 + row * 3.1) % (Math.PI * 2),
       });
     }
   }
 
-  // Generate hex edges
-  const ADJ = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  // Generate rectangular grid edges (4-connected: right and down)
+  const ADJ = [[1, 0], [0, 1]];
   const latticeEdges = [];
 
   for (const v of verts) {
-    for (const [dq, dr] of ADJ) {
-      const nIdx = vertMap.get(`${v.q + dq},${v.r + dr}`);
-      if (nIdx === undefined || v.idx >= nIdx) continue;
+    for (const [dc, dr] of ADJ) {
+      const nIdx = vertMap.get(`${v.col + dc},${v.row + dr}`);
+      if (nIdx === undefined) continue;
       const nv = verts[nIdx];
       const edgeDist = (v.dist + nv.dist) / 2;
       const radialFade = Math.min(v.radialFade, nv.radialFade);
@@ -305,15 +365,15 @@ function buildClusterIC(group, cluster, config, circleTex) {
   edgeLines.visible = false;
   group.add(edgeLines);
 
-  // ── Data dots (flowing along lattice edges) ───────────────────────────
+  // ── Data dots (stationary at vertices, occasional blink) ─────────────
   const dotInfos = [];
   let _seed = 42 + Math.round(ignitionT * 100); // different seed per cluster
   function dotRand() { _seed = (_seed * 16807 + 0) % 2147483647; return _seed / 2147483647; }
   for (let d = 0; d < DOT_COUNT; d++) {
     dotInfos.push({
-      edgeIdx: Math.floor(dotRand() * nEdges),
-      speed:   0.65 + dotRand() * 0.55,
-      pos:     dotRand(),
+      vertIdx:    Math.floor(dotRand() * nVerts),
+      blinkFreq:  1.5 + dotRand() * 3.0,   // 1.5–4.5 Hz — varied blink rates
+      blinkPhase: dotRand() * Math.PI * 2,  // random phase offset
     });
   }
 
@@ -374,7 +434,7 @@ function buildClusterIC(group, cluster, config, circleTex) {
       hub.active = true;
     }
 
-    // Phase B/C/D: Connections
+    // Phase B/C/D: Connections — grow from both ends, meet in middle
     for (let ci = 0; ci < connections.length; ci++) {
       const conn = connections[ci];
 
@@ -382,26 +442,24 @@ function buildClusterIC(group, cluster, config, circleTex) {
 
       const drawAge = elapsed - conn.startT;
       const drawT   = Math.min(drawAge / connDrawDur, 1);
-      const drawE   = easeOutCubic(drawT);
+      const drawE   = easeInOutCubic(drawT);
 
-      // Show tube with drawRange
+      // Single tube: grows from node toward hexagon
       conn.tubeMesh.visible = true;
       conn.tubeMat.opacity  = 0.8;
-
       if (conn.tubeGeo.index) {
-        conn.tubeGeo.index.count = Math.floor(drawE * conn.totalIndices);
+        conn.tubeGeo.index.count = Math.floor(drawE * conn.tubeTotal);
       } else {
-        conn.tubeGeo.setDrawRange(0, Math.floor(drawE * conn.totalIndices));
+        conn.tubeGeo.setDrawRange(0, Math.floor(drawE * conn.tubeTotal));
       }
 
-      // Mark as drawn when tube finishes
+      // Mark as drawn when tube reaches hexagon
       if (drawT >= 1 && !conn.drawn) {
         conn.drawn  = true;
         conn.drawnT = elapsed;
-        conn.node.haloBoost = true;
       }
 
-      // Smooth blue → gold color transition
+      // Smooth blue → copper color transition on node
       if (conn.drawn) {
         const colorT = Math.min((elapsed - conn.drawnT) / COLOR_TRANSITION_DUR, 1);
         _lerpColor.copy(_blueColor).lerp(COPPER_COLOR, colorT);
@@ -418,13 +476,13 @@ function buildClusterIC(group, cluster, config, circleTex) {
       lattBuildEnd   = lattBuildStart + latticeBuildDur;
       lattHoldEnd    = lattBuildEnd + latticeHoldDur;
       lattFadeEnd    = lattHoldEnd + latticeFadeDur;
-      // Immediately snap all nodes to same phase
+      // Signal globe.js: cluster nodes sync to cluster's lead phase
+      cluster.clusterSynced = true;
+      cluster.clusterSyncStartT = elapsed;
+      cluster.leadPhase = nodes[0].phase; // start from first node's current phase
       for (const node of nodes) {
-        node.syncState    = 'synced';
-        node.phase        = 0;
-        node.pulseFreq    = 0.40;
-        node.syncFreq     = 0.40;
-        node.baseEmissive = 2.0;
+        node.baseEmissive = 1.0;
+        node.clusterSynced = true;
       }
     }
 
@@ -432,28 +490,46 @@ function buildClusterIC(group, cluster, config, circleTex) {
       flowAccum += dt;
       const sinceAll = elapsed - allConnectedT;
 
-      // Fade emissive flash over 0.4s
-      if (sinceAll < 0.4) {
-        for (const node of nodes) {
-          node.baseEmissive = 2.0 - (sinceAll / 0.4) * 1.0;
-        }
-      } else {
-        for (const node of nodes) {
-          node.baseEmissive = 1.0;
-        }
+      // ── Entanglement color transition: copper → bright yellow ──────────
+      const entangleT = Math.min(sinceAll / ENTANGLE_TRANSITION_DUR, 1);
+      const entangleE = entangleT * entangleT * (3 - 2 * entangleT); // smoothstep
+      _lerpColor.copy(COPPER_COLOR).lerp(ENTANGLED_COLOR, entangleE);
+      // Transition tube colors
+      for (const conn of connections) {
+        conn.tubeMat.color.copy(_lerpColor);
+      }
+      // Transition hub color to bright yellow
+      hub.mat.color.copy(_lerpColor);
+      // Transition node colors to match — all nodes get lighter together
+      for (const node of nodes) {
+        node.baseColor.copy(COPPER_COLOR).lerp(ENTANGLED_COLOR, entangleE);
       }
 
-      // Reverse pulses: node → hub side (uses flowAccum so pulses survive timeline end)
-      const pulsePos  = 1.0 - ((flowAccum * flowSpeed) % 1);
-      const pulseAtHub = pulsePos < GLOW_TRAIL;
+      // Pulses travel node(t=0) → hub(t=1) with smooth fade at endpoints
+      const pulsePos  = (flowAccum * flowSpeed) % 1;
+      const pulseAtHub = pulsePos > (1 - GLOW_TRAIL);
 
-      // Hub brightens when pulse arrives
+      // Hub brightens gently when pulse arrives (pulse near t=1 = hub end)
       if (pulseAtHub) {
-        hub.mat.opacity = Math.min(1.0, hub.mat.opacity + 4.0 * dt);
-        const hubBright = 1.0 + (1.0 - pulsePos / GLOW_TRAIL) * 1.5;
-        hub.mesh.scale.setScalar(1.0 + (hubBright - 1.0) * 0.05);
+        hub.mat.opacity = Math.min(1.0, hub.mat.opacity + 2.0 * dt);
+        const hubProximity = (pulsePos - (1 - GLOW_TRAIL)) / GLOW_TRAIL;
+        const hubBright = 1.0 + hubProximity * 0.6;
+        hub.mesh.scale.setScalar(1.0 + (hubBright - 1.0) * 0.03);
       }
 
+      // Endpoint fade zones: pulse fades out near hub (t=1) and fades in near node (t=0)
+      const FADE_ZONE = 0.15; // fraction of tube length for fade-in/out
+      let endpointFade = 1;
+      if (pulsePos < FADE_ZONE) {
+        endpointFade = pulsePos / FADE_ZONE;           // fade in from node end
+      } else if (pulsePos > (1 - FADE_ZONE)) {
+        endpointFade = (1 - pulsePos) / FADE_ZONE;     // fade out at hub end
+      }
+
+      // Glow pulse colors also shift to entangled yellow
+      const glowR = 0.95 + entangleE * 0.05;  // → 1.0
+      const glowG = 0.75 + entangleE * 0.13;  // → 0.88
+      const glowB = 0.35 + entangleE * 0.05;  // → 0.40
       for (const conn of connections) {
         conn.glowMesh.visible = true;
         const colors = conn.glowColors;
@@ -462,13 +538,13 @@ function buildClusterIC(group, cluster, config, circleTex) {
           let bright = 0;
           const dist = Math.abs(t - pulsePos);
           if (dist < GLOW_TRAIL) {
-            bright = Math.pow(1 - dist / GLOW_TRAIL, 2) * FLOW_BRIGHT;
+            bright = Math.pow(1 - dist / GLOW_TRAIL, 2) * FLOW_BRIGHT * endpointFade;
           }
           for (let r = 0; r < GLOW_VERTS_PER_RING; r++) {
             const i3 = (ring * GLOW_VERTS_PER_RING + r) * 3;
-            colors[i3]     = bright * 0.95;
-            colors[i3 + 1] = bright * 0.75;
-            colors[i3 + 2] = bright * 0.35;
+            colors[i3]     = bright * glowR;
+            colors[i3 + 1] = bright * glowG;
+            colors[i3 + 2] = bright * glowB;
           }
         }
         conn.glowGeo.attributes.color.needsUpdate = true;
@@ -500,7 +576,8 @@ function buildClusterIC(group, cluster, config, circleTex) {
         }
 
         const fadeIn      = Math.min(vertRevealAge / 0.25, 1);
-        const subtlePulse = 0.92 + 0.08 * Math.sin(elapsed * 2 + v.idx * 0.3);
+        const latticeBreath = (1 - Math.cos(elapsed * 1.8 + v.pulsePhase)) * 0.5;
+        const subtlePulse = 0.88 + 0.32 * latticeBreath;
         const baseBright  = 0.5 * subtlePulse;
         const waveBright  = getLatticWaveBright(elapsed, v.dist);
 
@@ -534,7 +611,7 @@ function buildClusterIC(group, cluster, config, circleTex) {
         }
 
         const drawT = Math.min(edgeRevealAge / 0.3, 1);
-        const drawE = easeOutCubic(drawT);
+        const drawE = easeInOutCubic(drawT);
         const baseBright = 0.40;
         const waveBright = getLatticWaveBright(elapsed, edge.dist) * 0.7;
         const bright     = (baseBright + waveBright) * drawE * edge.radialFade * globalFade;
@@ -561,33 +638,27 @@ function buildClusterIC(group, cluster, config, circleTex) {
       eGeo.attributes.position.needsUpdate = true;
       eGeo.attributes.color.needsUpdate    = true;
 
-      // ── Update data dots ───────────────────────────────────────────
+      // ── Update data dots — stationary at vertices, occasional blink ──
       for (let di = 0; di < DOT_COUNT; di++) {
-        const dot  = dotInfos[di];
-        const edge = latticeEdges[dot.edgeIdx];
-        const d3   = di * 3;
-        const aI3  = edge.a * 3;
-        const bI3  = edge.b * 3;
+        const dot = dotInfos[di];
+        const d3  = di * 3;
+        // Place at vertex position (fixed, no movement)
+        const vi3 = dot.vertIdx * 3;
+        dPosArr[d3]     = vPosArr[vi3];
+        dPosArr[d3 + 1] = vPosArr[vi3 + 1];
+        dPosArr[d3 + 2] = vPosArr[vi3 + 2];
 
-        const edgeRevealAge = buildAge - edge.revealDelay;
-        if (edgeRevealAge < 0.4) {
+        const v = verts[dot.vertIdx];
+        const vertRevealAge = buildAge - v.revealDelay;
+        if (vertRevealAge < 0.3) {
           dColArr[d3] = dColArr[d3 + 1] = dColArr[d3 + 2] = 0;
-          dPosArr[d3] = vPosArr[aI3]; dPosArr[d3 + 1] = vPosArr[aI3 + 1]; dPosArr[d3 + 2] = vPosArr[aI3 + 2];
           continue;
         }
 
-        dot.pos += dot.speed * dt;
-        if (dot.pos > 1) dot.pos -= 1;
-
-        const t  = dot.pos;
-        const ax = vPosArr[aI3], ay = vPosArr[aI3 + 1], az = vPosArr[aI3 + 2];
-        const bx = vPosArr[bI3], by = vPosArr[bI3 + 1], bz = vPosArr[bI3 + 2];
-
-        dPosArr[d3]     = ax + (bx - ax) * t;
-        dPosArr[d3 + 1] = ay + (by - ay) * t;
-        dPosArr[d3 + 2] = az + (bz - az) * t;
-
-        const dotBright = 0.8 * edge.radialFade * globalFade;
+        // Random blink: use sin with unique phase/freq — ON when > 0.3
+        const blinkVal = Math.sin(elapsed * dot.blinkFreq + dot.blinkPhase);
+        const on = blinkVal > 0.3 ? 1.0 : 0.0;
+        const dotBright = on * 0.7 * v.radialFade * globalFade;
         dColArr[d3]     = DOT_COLOR.r * dotBright;
         dColArr[d3 + 1] = DOT_COLOR.g * dotBright;
         dColArr[d3 + 2] = DOT_COLOR.b * dotBright;
@@ -606,264 +677,61 @@ export function createInterconnect(globeGroup, clusters) {
   const group = new THREE.Group();
   globeGroup.add(group);
 
-  const waterloo = clusters.find(c => c.name === 'Waterloo');
-  const ottawa   = clusters.find(c => c.name === 'Ottawa');
-  const montreal = clusters.find(c => c.name === 'Montréal');
+  const clusterMap = {};
+  for (const c of clusters) clusterMap[c.name] = c;
 
-  if (!waterloo) return { group, update: () => {} };
-
-  const waterlooNodes = waterloo.nodes;
   const circleTex = createCircleTexture();
 
-  // ── Grey node-to-node lines (Waterloo pre-interconnect) ───────────────
-  const greyLines = [];
-  const nodePairs = [[0, 1], [0, 2], [1, 2]];
-
-  for (const [ai, bi] of nodePairs) {
-    const posA = waterlooNodes[ai].position.clone();
-    const posB = waterlooNodes[bi].position.clone();
-    const curve = new THREE.LineCurve3(posA, posB);
-    const tubeGeo = new THREE.TubeGeometry(curve, 16, 0.0002, 6, false);
-    const tubeMat = new THREE.MeshBasicMaterial({
-      color: GREY_LINE_COLOR, transparent: false, opacity: 1, depthWrite: true,
-    });
-    const mesh = new THREE.Mesh(tubeGeo, tubeMat);
-    mesh.visible = false;
-    group.add(mesh);
-    greyLines.push({ mesh, mat: tubeMat, curve, ai, bi });
+  // Helper: build IC for a named cluster if it exists and has >1 node
+  function tryBuild(name, config) {
+    const cluster = clusterMap[name];
+    if (!cluster || cluster.nodes.length < 2) return null;
+    const starts = new Array(cluster.nodes.length).fill(config.ignitionT);
+    return buildClusterIC(group, cluster, { connStarts: starts, ...config }, circleTex);
   }
 
-  // ── Failed pulse geometry (Waterloo only) ─────────────────────────────
-  const PULSE_TUBULAR = 128;
-  const PULSE_RADIAL  = 6;
-  const PULSE_VERTS_PER_RING = PULSE_RADIAL + 1;
-  const pulseGlowGeo = new THREE.TubeGeometry(
-    greyLines[0].curve, PULSE_TUBULAR, 0.0002, PULSE_RADIAL, false,
-  );
-  const pulseGlowColors = new Float32Array(
-    pulseGlowGeo.attributes.position.count * 3,
-  );
-  pulseGlowGeo.setAttribute(
-    'color', new THREE.BufferAttribute(pulseGlowColors, 3),
-  );
-  const pulseGlowMat = new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-  });
-  const pulseGlowMesh = new THREE.Mesh(pulseGlowGeo, pulseGlowMat);
-  pulseGlowMesh.renderOrder = 10;
-  pulseGlowMesh.visible = false;
-  group.add(pulseGlowMesh);
-
-  // Scatter particles
-  const SCATTER_COUNT = 10;
-  const scatterPosArr = new Float32Array(SCATTER_COUNT * 3);
-  const scatterColArr = new Float32Array(SCATTER_COUNT * 3);
-  const scatterGeo = new THREE.BufferGeometry();
-  scatterGeo.setAttribute('position', new THREE.BufferAttribute(scatterPosArr, 3));
-  scatterGeo.setAttribute('color', new THREE.BufferAttribute(scatterColArr, 3));
-  const scatterMat = new THREE.PointsMaterial({
-    size: 0.00012, map: circleTex, transparent: true,
-    blending: THREE.AdditiveBlending, sizeAttenuation: true,
-    depthWrite: false, depthTest: false, vertexColors: true,
-  });
-  const scatterPoints = new THREE.Points(scatterGeo, scatterMat);
-  scatterPoints.renderOrder = 11;
-  scatterPoints.visible = false;
-  group.add(scatterPoints);
-
-  const lineDir = greyLines[0].curve.v2.clone().sub(greyLines[0].curve.v1).normalize();
-  const lineNormal = lineDir.clone().cross(
-    greyLines[0].curve.v1.clone().normalize()
-  ).normalize();
-  const lineBinormal = lineDir.clone().cross(lineNormal).normalize();
-
-  const scatterParticles = [];
-  for (let i = 0; i < SCATTER_COUNT; i++) {
-    const spawnFrac = 0.3 + (i / SCATTER_COUNT) * 0.6;
-    const angle = Math.random() * Math.PI * 2;
-    const driftDir = lineNormal.clone().multiplyScalar(Math.cos(angle))
-      .addScaledVector(lineBinormal, Math.sin(angle));
-    scatterParticles.push({
-      spawnFrac, driftDir,
-      speed: 0.0008 + Math.random() * 0.0012,
-      life: 0,
-    });
-  }
-
-  // ── Cluster interconnects ─────────────────────────────────────────────
-  const waterlooIC = buildClusterIC(group, waterloo, {
-    ignitionT:  16.0,
-    connStarts: [17.4, 18.2, 19.0],
-    connDrawDur: 0.8,
-    flowSpeed:   0.8,
-    hexRings:    8,
-    latticeBuildDur: 1.0,
-    latticeHoldDur:  1.5,
-    latticeFadeDur:  0.5,
-  }, circleTex);
-
-  const ottawaIC = ottawa ? buildClusterIC(group, ottawa, {
-    ignitionT:  26.0,
-    connStarts: [26.4, 26.8],
-    connDrawDur: 0.5,
-    flowSpeed:   1.0,
-    hexRings:    6,
-    latticeBuildDur: 0.8,
-    latticeHoldDur:  1.0,
-    latticeFadeDur:  0.3,
-  }, circleTex) : null;
-
-  const montrealIC = montreal ? buildClusterIC(group, montreal, {
-    ignitionT:  26.0,
-    connStarts: [26.4, 26.8, 27.2],
-    connDrawDur: 0.5,
-    flowSpeed:   1.0,
-    hexRings:    6,
-    latticeBuildDur: 0.8,
-    latticeHoldDur:  1.0,
-    latticeFadeDur:  0.3,
-  }, circleTex) : null;
+  // ── Cluster interconnects — all multi-node cities ───────────────────
+  const allICs = [
+    // Waterloo — during close-up (17.5-25s), fires shortly after 3 nodes appear
+    // Lattice holds long enough to overlap with the camera pull-back start (t=25)
+    // so the hex gently fades while the camera moves — no abrupt cut
+    tryBuild('Waterloo', {
+      ignitionT: 15.5, connDrawDur: 0.8, flowSpeed: 0.8,
+      hexRings: 8, latticeBuildDur: 1.5, latticeHoldDur: 3.5, latticeFadeDur: 1.5,
+    }),
+    // Ottawa — tubes + pulses only, fires at start of 3-city view
+    tryBuild('Ottawa', {
+      ignitionT: 23.5, connDrawDur: 0.6, flowSpeed: 0.9, skipLattice: true,
+    }),
+    // Montréal — tubes + pulses only, fires at start of 3-city view
+    tryBuild('Montréal', {
+      ignitionT: 23.5, connDrawDur: 0.6, flowSpeed: 0.9, skipLattice: true,
+    }),
+    // Newfoundland — tubes + pulses only, fires at start of regional view
+    tryBuild('Newfoundland', {
+      ignitionT: 33.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+    }),
+    // Calgary — tubes + pulses only, fires at start of west view
+    tryBuild('Calgary', {
+      ignitionT: 42.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+    }),
+    // Vancouver — tubes + pulses only, fires at start of west view
+    tryBuild('Vancouver', {
+      ignitionT: 42.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+    }),
+    // Iqaluit — tubes + pulses only, fires at start of Canada-wide view
+    tryBuild('Iqaluit', {
+      ignitionT: 51.0, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+    }),
+    // Yellowknife — tubes + pulses only, fires at start of Canada-wide view
+    tryBuild('Yellowknife', {
+      ignitionT: 51.0, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+    }),
+  ].filter(Boolean);
 
   // ── Update ────────────────────────────────────────────────────────────
   function update(elapsed, dt) {
-    // ── Grey lines + failed pulse (Waterloo only) ─────────────────────
-    if (elapsed >= GREY_LINES_START && elapsed < GREY_LINES_END + 0.5) {
-      const fadeIn  = Math.min((elapsed - GREY_LINES_START) / GREY_LINES_FADE_DUR, 1);
-      const fadeOut = elapsed > GREY_LINES_END
-        ? Math.max(0, 1 - (elapsed - GREY_LINES_END) / 0.5)
-        : 1;
-      const greyOpacity = fadeIn * fadeOut;
-
-      for (const gl of greyLines) {
-        gl.mesh.visible  = greyOpacity > 0;
-        gl.mat.opacity   = greyOpacity;
-        gl.mat.transparent = greyOpacity < 1;
-      }
-
-      // Hero node brightens before releasing pulse
-      const flashLeadIn = 0.4;
-      const flashFade   = 0.25;
-      if (elapsed >= FAILED_PULSE_START - flashLeadIn &&
-          elapsed < FAILED_PULSE_START + flashFade) {
-        const flashAge = elapsed - (FAILED_PULSE_START - flashLeadIn);
-        if (flashAge < flashLeadIn) {
-          const ramp = flashAge / flashLeadIn;
-          waterlooNodes[0].baseEmissive = 1.0 + ramp * ramp * 4.0;
-        } else {
-          const releaseT = (flashAge - flashLeadIn) / flashFade;
-          waterlooNodes[0].baseEmissive = 5.0 - releaseT * 4.0;
-        }
-      } else if (elapsed >= FAILED_PULSE_START + flashFade) {
-        waterlooNodes[0].baseEmissive = 1.0;
-      }
-
-      // Failed pulse: light travels along grey line 0
-      if (elapsed >= FAILED_PULSE_START && elapsed < FAILED_PULSE_START + FAILED_PULSE_DUR) {
-        const pAge = elapsed - FAILED_PULSE_START;
-        const pT   = pAge / FAILED_PULSE_DUR;
-
-        const startOffset = 0.18;
-        const endPos      = 0.70;
-        const headPos     = startOffset + pT * (2 - pT) * (endPos - startOffset);
-        const globalDim   = Math.max(0, Math.pow(1 - pT * 1.25, 3.0));
-        const trailLen    = 0.06;
-
-        pulseGlowMesh.visible = true;
-
-        for (let ring = 0; ring <= PULSE_TUBULAR; ring++) {
-          const t = ring / PULSE_TUBULAR;
-          let bright = 0;
-
-          if (t <= headPos && t >= headPos - trailLen) {
-            const distFromHead = (headPos - t) / trailLen;
-            const localBright  = Math.pow(1 - distFromHead, 2);
-            bright = localBright * globalDim * 14.0;
-          }
-
-          for (let r = 0; r < PULSE_VERTS_PER_RING; r++) {
-            const vi = ring * PULSE_VERTS_PER_RING + r;
-            const i3 = vi * 3;
-            pulseGlowColors[i3]     = bright;
-            pulseGlowColors[i3 + 1] = bright;
-            pulseGlowColors[i3 + 2] = bright;
-          }
-        }
-        pulseGlowGeo.attributes.color.needsUpdate = true;
-
-        // Scatter particles
-        scatterPoints.visible = true;
-        const _spawnPt = new THREE.Vector3();
-        for (let si = 0; si < SCATTER_COUNT; si++) {
-          const sp = scatterParticles[si];
-          const i3 = si * 3;
-
-          if (pT >= sp.spawnFrac && sp.life === 0) {
-            greyLines[0].curve.getPoint(headPos, _spawnPt);
-            sp.baseX = _spawnPt.x;
-            sp.baseY = _spawnPt.y;
-            sp.baseZ = _spawnPt.z;
-            sp.spawnBright = globalDim * 14.0;
-            sp.life = 0.001;
-          }
-
-          if (sp.life > 0) {
-            sp.life += dt;
-            const drift = sp.life * sp.speed;
-            const fade  = Math.max(0, 1 - sp.life / 0.6);
-
-            scatterPosArr[i3]     = sp.baseX + sp.driftDir.x * drift;
-            scatterPosArr[i3 + 1] = sp.baseY + sp.driftDir.y * drift;
-            scatterPosArr[i3 + 2] = sp.baseZ + sp.driftDir.z * drift;
-
-            const bright = fade * (sp.spawnBright || 1.0);
-            scatterColArr[i3]     = bright;
-            scatterColArr[i3 + 1] = bright;
-            scatterColArr[i3 + 2] = bright;
-          } else {
-            scatterColArr[i3] = scatterColArr[i3 + 1] = scatterColArr[i3 + 2] = 0;
-          }
-        }
-        scatterGeo.attributes.position.needsUpdate = true;
-        scatterGeo.attributes.color.needsUpdate    = true;
-      } else {
-        pulseGlowMesh.visible = false;
-        if (elapsed >= FAILED_PULSE_START + FAILED_PULSE_DUR &&
-            elapsed < FAILED_PULSE_START + FAILED_PULSE_DUR + 0.6) {
-          scatterPoints.visible = true;
-          for (let si = 0; si < SCATTER_COUNT; si++) {
-            const sp = scatterParticles[si];
-            const i3 = si * 3;
-            if (sp.life > 0) {
-              sp.life += dt;
-              const drift = sp.life * sp.speed;
-              const fade  = Math.max(0, 1 - sp.life / 0.6);
-              scatterPosArr[i3]     = sp.baseX + sp.driftDir.x * drift;
-              scatterPosArr[i3 + 1] = sp.baseY + sp.driftDir.y * drift;
-              scatterPosArr[i3 + 2] = sp.baseZ + sp.driftDir.z * drift;
-              const bright = fade * (sp.spawnBright || 1.0);
-              scatterColArr[i3]     = bright;
-              scatterColArr[i3 + 1] = bright;
-              scatterColArr[i3 + 2] = bright;
-            }
-          }
-          scatterGeo.attributes.position.needsUpdate = true;
-          scatterGeo.attributes.color.needsUpdate    = true;
-        } else {
-          scatterPoints.visible = false;
-          for (const sp of scatterParticles) sp.life = 0;
-        }
-      }
-    } else {
-      for (const gl of greyLines) gl.mesh.visible = false;
-      pulseGlowMesh.visible = false;
-      scatterPoints.visible = false;
-    }
-
-    // ── Gold interconnects (all clusters) ────────────────────────────────
-    waterlooIC.update(elapsed, dt);
-    if (ottawaIC)   ottawaIC.update(elapsed, dt);
-    if (montrealIC) montrealIC.update(elapsed, dt);
+    for (const ic of allICs) ic.update(elapsed, dt);
   }
 
   return { group, update };

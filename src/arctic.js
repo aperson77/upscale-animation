@@ -31,7 +31,7 @@ const BLUE_GLOW_G   = 0.60;
 const BLUE_GLOW_B   = 1.00;
 
 // ─── Geometry ────────────────────────────────────────────────────────────────
-const TUBE_RADIUS     = 0.0006;
+const TUBE_RADIUS     = 0.0012;
 const GLOW_TUBULAR    = 64;
 const GLOW_RADIAL     = 6;
 const GLOW_VERTS_PER_RING = GLOW_RADIAL + 1;
@@ -43,54 +43,46 @@ const PULSE_COUNT      = 2;
 
 // ─── Ground cluster IC definitions ───────────────────────────────────────────
 // Southern cities fire during Shot 1, Arctic clusters during Shot 2
-const SOUTHERN_IC_NAMES = ['Calgary', 'Vancouver'];
-const ARCTIC_IC_NAMES   = ['Iqaluit', 'Yellowknife', 'Inuvik', 'Alert', 'Cambridge Bay', 'Churchill'];
+// Multi-node cities (Calgary, Vancouver, Iqaluit, Yellowknife) now handled by interconnect.js
+const SOUTHERN_IC_NAMES = [];
+const ARCTIC_IC_NAMES   = ['Inuvik', 'Tuktoyaktuk', 'Alert', 'Cambridge Bay', 'Churchill', 'Whitehorse'];
 const LOCAL_IC_CLUSTER_NAMES = [...SOUTHERN_IC_NAMES, ...ARCTIC_IC_NAMES];
 
-const SOUTHERN_IC_START = 31.5;  // after Cal/Van connections draw at 31s
-const ARCTIC_IC_START   = 36.0;
+const SOUTHERN_IC_START = 42.0;  // after Cal/Van connections draw
+const ARCTIC_IC_START   = 51.0;  // during all-Canada view (50.5-56)
 const LOCAL_IC_STAGGER  = 0.05;
 const LOCAL_IC_DUR      = 0.2;
 
-// ─── Satellite uplink definitions — straight lines ground→orbit ─────────────
+// ─── Satellite uplink definitions — ALL cities connect to satellite ──────────
 const SAT_TO_GROUND = [
-  { from: 'Sat-Polar', to: 'Calgary',       t: 46.5, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Iqaluit',       t: 46.8, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Yellowknife',   t: 47.1, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Churchill',     t: 47.4, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Cambridge Bay', t: 47.7, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Alert',         t: 48.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Waterloo',      t: 60.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Ottawa',        t: 60.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Montréal',      t: 60.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Calgary',       t: 60.3, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Newfoundland',  t: 60.3, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Vancouver',     t: 60.3, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Iqaluit',       t: 60.6, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Yellowknife',   t: 60.6, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Churchill',     t: 60.9, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Cambridge Bay', t: 60.9, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Inuvik',        t: 61.2, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Tuktoyaktuk',   t: 61.2, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Alert',         t: 61.5, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Whitehorse',   t: 61.5, dur: 0.8 },
 ];
 
-const ORBIT_FREEZE_T   = 46.5;  // freeze satellite orbit when arcs fire (Shot 3)
-const ORBIT_UNFREEZE_T = 52.0;  // release satellite for free orbit (Shot 4)
-const ARC_FADE_START   = 52.0;  // fade out blue arcs when satellite released
+const ORBIT_FREEZE_T   = 60.0;  // freeze satellite orbit when arcs fire (Shot 3)
+const ORBIT_UNFREEZE_T = 65.0;  // release satellite for free orbit (Shot 4)
+const ARC_FADE_START   = 65.0;  // fade out blue arcs when satellite released
 const ARC_FADE_DUR     = 2.0;   // seconds to fully fade arcs
-const GROUND_IC_START  = 31.5;  // earliest IC (southern cities)
-const SPACE_ARC_START  = 46.5;
+const GROUND_IC_START  = 33.0;  // earliest IC (NF at 33.5)
+const SPACE_ARC_START  = 60.0;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-function buildArc(startPos, endPos, segments = 64) {
-  const dirA = startPos.clone().normalize();
-  const dirB = endPos.clone().normalize();
-  const rA   = startPos.length();
-  const rB   = endPos.length();
-
-  const pts = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const dir = new THREE.Vector3().lerpVectors(dirA, dirB, t).normalize();
-    const baseR = rA + (rB - rA) * t;
-    const lift = Math.sin(t * Math.PI) * Math.abs(rA - rB) * 0.15;
-    pts.push(dir.clone().multiplyScalar(baseR + lift));
-  }
-  return new THREE.CatmullRomCurve3(pts);
-}
-
 function buildTubeConnection(group, curve, segments = 24, tubeColor = COPPER) {
-  const tubeGeo = new THREE.TubeGeometry(curve, segments, TUBE_RADIUS, 6, false);
+  const tubeGeo = new THREE.TubeGeometry(curve, segments, TUBE_RADIUS, 8, false);
   const tubeMat = new THREE.MeshBasicMaterial({
     color: tubeColor, transparent: true, opacity: 0, depthWrite: false,
   });
@@ -246,23 +238,35 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
     groundInitDone = true;
   }
 
-  // ── Init satellite uplinks (straight lines, built once after orbit freezes) ─
+  // ── Init satellite uplinks — straight cylinders (no curves, no wobble) ──
   function initSpace() {
     for (const def of SAT_TO_GROUND) {
-      const fromPos = getPos(def.from);  // satellite
-      const toPos   = getPos(def.to);    // ground hub
-      if (!fromPos || !toPos) continue;
+      const satPos    = getPos(def.from);  // satellite (frozen at t=50)
+      const groundPos = getPos(def.to);    // ground hub
+      if (!satPos || !groundPos) continue;
 
-      // Straight line from ground hub up to satellite
-      const curve = new THREE.LineCurve3(toPos, fromPos);
-      const conn  = buildTubeConnection(group, curve, 24, BLUE_TUBE);
+      // Straight cylinder from ground station to satellite
+      const dir    = new THREE.Vector3().subVectors(satPos, groundPos);
+      const length = dir.length();
+      const mid    = groundPos.clone().add(satPos).multiplyScalar(0.5);
+
+      const geo = new THREE.CylinderGeometry(TUBE_RADIUS, TUBE_RADIUS, length, 6, 1, true);
+      const mat = new THREE.MeshBasicMaterial({
+        color: BLUE_TUBE, transparent: true, opacity: 0, depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(mid);
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),  // cylinder default axis
+        dir.clone().normalize(),
+      );
+      mesh.visible = false;
+      group.add(mesh);
 
       spaceArcs.push({
-        ...conn,
+        mesh, mat,
         revealT: def.t, drawDur: def.dur,
-        drawn: false, drawnT: 0, flowAccum: 0,
-        _elapsed: 0,
-        glowR: BLUE_GLOW_R, glowG: BLUE_GLOW_G, glowB: BLUE_GLOW_B,
+        drawn: false,
         fromName: def.from, toName: def.to,
       });
     }
@@ -295,6 +299,7 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
         sg.cluster.hub.active = true;
         if (sg.node) {
           sg.node.baseColor = COPPER_COLOR.clone();
+          sg.node.baseEmissive = 1.15; // brightness boost for single-node city
           sg.node.haloBoost = true;
           sg.node.syncState = 'synced';
           sg.node.phase     = 0;
@@ -336,7 +341,7 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
       }
     }
 
-    // ── Phase 2: Satellite uplinks (straight lines ground→orbit) ─────────
+    // ── Phase 2: Satellite uplinks (straight cylinders ground→orbit) ─────
     if (elapsed >= SPACE_ARC_START) {
       if (!spaceInitDone) initSpace();
 
@@ -348,41 +353,22 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
       for (const arc of spaceArcs) {
         if (elapsed < arc.revealT) continue;
 
-        // Fully faded — hide and skip
         if (fadeProgress >= 1) {
-          arc.tubeMesh.visible = false;
-          arc.glowMesh.visible = false;
+          arc.mesh.visible = false;
           continue;
         }
-
-        arc._elapsed = elapsed;
 
         const age   = elapsed - arc.revealT;
         const drawT = Math.min(age / arc.drawDur, 1);
         const drawE = easeOutCubic(drawT);
 
-        arc.tubeMesh.visible = true;
-        arc.tubeMat.opacity  = 0.6 * (1 - fadeProgress);
-
-        if (arc.tubeGeo.index) {
-          arc.tubeGeo.index.count = Math.floor(drawE * arc.totalIndices);
-        } else {
-          arc.tubeGeo.setDrawRange(0, Math.floor(drawE * arc.totalIndices));
-        }
+        arc.mesh.visible = true;
+        arc.mat.opacity  = drawE * 0.5 * (1 - fadeProgress);
 
         if (drawT >= 1 && !arc.drawn) {
-          arc.drawn  = true;
-          arc.drawnT = elapsed;
-
-          // Shift satellite to gold when first arc completes
+          arc.drawn = true;
           const sat = satMap[arc.fromName];
-          if (sat && !sat.baseColor) sat.baseColor = COPPER_COLOR.clone();
-        }
-
-        if (fadeProgress === 0) {
-          updateGlow(arc, dt);
-        } else {
-          arc.glowMesh.visible = false;
+          if (sat) sat.baseColor = COPPER_COLOR.clone();
         }
       }
     }

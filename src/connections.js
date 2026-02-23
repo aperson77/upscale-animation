@@ -17,7 +17,7 @@ const GLOW_COLOR_B  = 1.00;
 
 // ─── Geometry ───────────────────────────────────────────────────────────────
 const ARC_SEGMENTS   = 64;
-const TUBE_RADIUS    = 0.0008;
+const TUBE_RADIUS    = 0.0014;
 const ARC_BASE_LIFT  = 0.05;
 
 // ─── Glow overlay ───────────────────────────────────────────────────────────
@@ -27,20 +27,32 @@ const GLOW_VERTS_PER_RING = GLOW_RADIAL + 1;
 const GLOW_TRAIL          = 0.10;   // length of the bright pulse head
 const GLOW_BRIGHT_DRAW    = 6.0;    // brightness during draw phase
 const GLOW_BRIGHT_FLOW    = 4.0;    // brightness for flowing pulses
-const DRAW_SPEED          = 0.8;    // seconds to draw the full arc
+const DRAW_SPEED          = 1.2;    // seconds to draw the full arc (smoother)
 const PULSE_SPEED         = 0.20;   // traversals per second for flowing pulses
 const PULSE_COUNT         = 2;      // number of flowing pulses per edge
 
 // ─── Edge definitions ──────────────────────────────────────────────────────
 const EDGE_DEFS = [
-  // Shot 1a — eastern fiber
-  { from: 'Waterloo',    to: 'Ottawa',       revealT: 28.5 },
-  { from: 'Ottawa',      to: 'Montréal',     revealT: 28.5 },
-  // Shot 1b — western fiber
-  { from: 'Waterloo',    to: 'Calgary',      revealT: 31.0 },
-  { from: 'Calgary',     to: 'Vancouver',    revealT: 31.0 },
-  // Shot 2 — Arctic fiber (Yellowknife↔Inuvik only; other Arctic via satellite)
-  { from: 'Yellowknife',   to: 'Inuvik',       revealT: 38.0 },
+  // Step 1 — 3-city connect (camera hold 23-30, hex IC fires at 23.5)
+  { from: 'Waterloo',      to: 'Ottawa',         revealT: 25.0 },
+  { from: 'Ottawa',        to: 'Montréal',       revealT: 25.0 },
+  // Step 2 — Newfoundland connects (camera hold 33-39.5, hex IC fires at 33.5)
+  { from: 'Montréal',      to: 'Newfoundland',   revealT: 35.0 },
+  // Step 3 — Calgary/Vancouver connect (camera hold 42-48, hex IC fires at 42.5)
+  { from: 'Waterloo',      to: 'Calgary',        revealT: 44.0 },
+  { from: 'Calgary',       to: 'Vancouver',      revealT: 44.0 },
+  // Step 4 — all Canada, Northern cities connect (camera hold 50.5-56, hex IC fires at 51)
+  { from: 'Yellowknife',   to: 'Inuvik',         revealT: 52.0 },
+  { from: 'Inuvik',        to: 'Tuktoyaktuk',    revealT: 52.0 },
+  { from: 'Iqaluit',       to: 'Cambridge Bay',  revealT: 52.0 },
+  { from: 'Cambridge Bay', to: 'Yellowknife',    revealT: 52.5 },
+  { from: 'Churchill',     to: 'Iqaluit',        revealT: 52.5 },
+  { from: 'Tuktoyaktuk',   to: 'Cambridge Bay',  revealT: 52.5 },
+  { from: 'Alert',         to: 'Iqaluit',        revealT: 53.0 },
+  { from: 'Cambridge Bay', to: 'Alert',          revealT: 53.0 },
+  { from: 'Churchill',     to: 'Yellowknife',    revealT: 53.0 },
+  { from: 'Whitehorse',    to: 'Inuvik',         revealT: 52.5 },
+  { from: 'Whitehorse',    to: 'Yellowknife',    revealT: 53.0 },
 ];
 
 // ─── Great-circle arc ──────────────────────────────────────────────────────
@@ -66,7 +78,7 @@ function arcPoints(a, b, segments = ARC_SEGMENTS) {
   return pts;
 }
 
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 
 // ─── createClassicalConnections ────────────────────────────────────────────
 export function createClassicalConnections(globeGroup, clusters) {
@@ -86,26 +98,39 @@ export function createClassicalConnections(globeGroup, clusters) {
     const hubA = cA.hub.position;
     const hubB = cB.hub.position;
     const pts  = arcPoints(hubA, hubB);
-    const curve = new THREE.CatmullRomCurve3(pts);
+    const fullCurve = new THREE.CatmullRomCurve3(pts);
 
-    // ── Base tube ───────────────────────────────────────────────────────
-    const tubeGeo = new THREE.TubeGeometry(curve, ARC_SEGMENTS, TUBE_RADIUS, 6, false);
-    const tubeMat = new THREE.MeshBasicMaterial({
-      color:       TUBE_COLOR,
-      transparent: true,
-      opacity:     0,
-      depthWrite:  false,
+    // Split arc into two halves: A→mid and B→mid (both grow outward, meet in middle)
+    const halfIdx = Math.floor(pts.length / 2);
+    const ptsA = pts.slice(0, halfIdx + 1);                   // A-end to midpoint
+    const ptsB = pts.slice(halfIdx).reverse();                 // B-end to midpoint
+    const curveA = new THREE.CatmullRomCurve3(ptsA);
+    const curveB = new THREE.CatmullRomCurve3(ptsB);
+
+    const halfSegs = Math.max(Math.floor(ARC_SEGMENTS / 2), 16);
+
+    // ── A-half tube (grows from city A toward midpoint) ─────────────────
+    const tubeGeoA = new THREE.TubeGeometry(curveA, halfSegs, TUBE_RADIUS, 8, false);
+    const tubeMatA = new THREE.MeshBasicMaterial({
+      color: TUBE_COLOR, transparent: true, opacity: 0, depthWrite: false,
     });
-    const tubeMesh = new THREE.Mesh(tubeGeo, tubeMat);
-    tubeMesh.visible = false;
-    group.add(tubeMesh);
+    const tubeMeshA = new THREE.Mesh(tubeGeoA, tubeMatA);
+    tubeMeshA.visible = false;
+    group.add(tubeMeshA);
+    const totalA = tubeGeoA.index ? tubeGeoA.index.count : tubeGeoA.attributes.position.count;
 
-    const totalIndices = tubeGeo.index
-      ? tubeGeo.index.count
-      : tubeGeo.attributes.position.count;
+    // ── B-half tube (grows from city B toward midpoint) ─────────────────
+    const tubeGeoB = new THREE.TubeGeometry(curveB, halfSegs, TUBE_RADIUS, 8, false);
+    const tubeMatB = new THREE.MeshBasicMaterial({
+      color: TUBE_COLOR, transparent: true, opacity: 0, depthWrite: false,
+    });
+    const tubeMeshB = new THREE.Mesh(tubeGeoB, tubeMatB);
+    tubeMeshB.visible = false;
+    group.add(tubeMeshB);
+    const totalB = tubeGeoB.index ? tubeGeoB.index.count : tubeGeoB.attributes.position.count;
 
-    // ── Glow overlay tube — per-vertex colored light pulses ─────────────
-    const glowGeo = new THREE.TubeGeometry(curve, GLOW_TUBULAR, TUBE_RADIUS * 1.2, GLOW_RADIAL, false);
+    // ── Glow overlay tube — full arc for traveling light pulses ──────────
+    const glowGeo = new THREE.TubeGeometry(fullCurve, GLOW_TUBULAR, TUBE_RADIUS * 1.2, GLOW_RADIAL, false);
     const glowColors = new Float32Array(glowGeo.attributes.position.count * 3);
     glowGeo.setAttribute('color', new THREE.BufferAttribute(glowColors, 3));
     const glowMat = new THREE.MeshBasicMaterial({
@@ -121,8 +146,9 @@ export function createClassicalConnections(globeGroup, clusters) {
     group.add(glowMesh);
 
     edges.push({
-      def, curve,
-      tubeMesh, tubeMat, tubeGeo, totalIndices,
+      def, curve: fullCurve,
+      tubeMeshA, tubeMatA, tubeGeoA, totalA,
+      tubeMeshB, tubeMatB, tubeGeoB, totalB,
       glowMesh, glowGeo, glowColors,
       revealT: def.revealT,
       drawn: false,
@@ -138,17 +164,26 @@ export function createClassicalConnections(globeGroup, clusters) {
 
       const age = elapsed - edge.revealT;
 
-      // ── Draw phase: tube extends along arc ─────────────────────────
+      // ── Draw phase: both halves extend toward midpoint simultaneously ──
       const drawT = Math.min(age / DRAW_SPEED, 1);
-      const drawE = easeOutCubic(drawT);
+      const drawE = easeInOutCubic(drawT);
 
-      edge.tubeMesh.visible = true;
-      edge.tubeMat.opacity  = TUBE_OPACITY;
-
-      if (edge.tubeGeo.index) {
-        edge.tubeGeo.index.count = Math.floor(drawE * edge.totalIndices);
+      // A-half: grows from city A toward midpoint
+      edge.tubeMeshA.visible = true;
+      edge.tubeMatA.opacity  = TUBE_OPACITY;
+      if (edge.tubeGeoA.index) {
+        edge.tubeGeoA.index.count = Math.floor(drawE * edge.totalA);
       } else {
-        edge.tubeGeo.setDrawRange(0, Math.floor(drawE * edge.totalIndices));
+        edge.tubeGeoA.setDrawRange(0, Math.floor(drawE * edge.totalA));
+      }
+
+      // B-half: grows from city B toward midpoint
+      edge.tubeMeshB.visible = true;
+      edge.tubeMatB.opacity  = TUBE_OPACITY;
+      if (edge.tubeGeoB.index) {
+        edge.tubeGeoB.index.count = Math.floor(drawE * edge.totalB);
+      } else {
+        edge.tubeGeoB.setDrawRange(0, Math.floor(drawE * edge.totalB));
       }
 
       if (drawT >= 1 && !edge.drawn) {
@@ -161,15 +196,26 @@ export function createClassicalConnections(globeGroup, clusters) {
       const colors = edge.glowColors;
 
       if (!edge.drawn) {
-        // During draw: single bright head at the draw front
+        // During draw: two bright heads converging from each end toward middle
         for (let ring = 0; ring <= GLOW_TUBULAR; ring++) {
           const t = ring / GLOW_TUBULAR;
           let bright = 0;
 
-          if (t <= drawE) {
-            const dist = drawE - t;
+          // Head growing from A-side (t=0 toward t=0.5)
+          const frontA = drawE * 0.5;  // A-side front position (0→0.5)
+          if (t <= frontA) {
+            const dist = frontA - t;
             if (dist < GLOW_TRAIL) {
-              bright = Math.pow(1 - dist / GLOW_TRAIL, 2) * GLOW_BRIGHT_DRAW;
+              bright = Math.max(bright, Math.pow(1 - dist / GLOW_TRAIL, 2) * GLOW_BRIGHT_DRAW);
+            }
+          }
+
+          // Head growing from B-side (t=1 toward t=0.5)
+          const frontB = 1.0 - drawE * 0.5;  // B-side front position (1→0.5)
+          if (t >= frontB) {
+            const dist = t - frontB;
+            if (dist < GLOW_TRAIL) {
+              bright = Math.max(bright, Math.pow(1 - dist / GLOW_TRAIL, 2) * GLOW_BRIGHT_DRAW);
             }
           }
 

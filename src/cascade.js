@@ -17,7 +17,7 @@ const Q_COPPER = new THREE.Color(0xd4a04a);
 
 const ARC_SEGS  = 64;
 const ARC_DRAW_SPEED = 0.08; // world-units per second so all arcs draw at consistent speed
-const CASCADE_START = 13; // seconds — Ontario triangle cascade starts as camera holds, before pull-back
+const CASCADE_START = 21; // seconds — Ontario triangle cascade starts after Waterloo interconnect fires
 const EDGE_MARGIN = 0.00015;
 
 // Great-circle arc matching classical connections: flat at endpoints, parabolic

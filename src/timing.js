@@ -18,17 +18,17 @@
 
 // ─── Phase table ─────────────────────────────────────────────────────────────
 export const PHASES = Object.freeze({
-  BEAT1: { start:      0, end:  5_000 },
-  BEAT2: { start:  5_000, end: 10_000 },
-  BEAT3: { start: 10_000, end: 16_000 },
-  BEAT4: { start: 16_000, end: 25_000 },
-  SHOT1: { start: 25_000, end: 33_000 },
-  SHOT2: { start: 35_000, end: 43_000 },
-  SHOT3: { start: 45_000, end: 50_000 },
-  SHOT4: { start: 52_000, end: 60_000 },
+  BEAT1: { start:      0, end:  7_000 },
+  BEAT2: { start:  7_000, end: 12_000 },
+  BEAT3: { start: 12_000, end: 18_000 },
+  BEAT4: { start: 18_000, end: 27_000 },
+  SHOT1: { start: 20_000, end: 42_000 },
+  SHOT2: { start: 42_000, end: 59_000 },
+  SHOT3: { start: 59_000, end: 63_000 },
+  SHOT4: { start: 65_000, end: 80_000 },
 });
 
-export const TOTAL_DURATION = 60_000; // ms
+export const TOTAL_DURATION = 80_000; // ms
 
 // ─── Easing functions ─────────────────────────────────────────────────────────
 // All take t ∈ [0, 1] and return a value ∈ [0, 1].

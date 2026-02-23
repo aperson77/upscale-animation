@@ -13,13 +13,13 @@ const NODE_RADIUS   = 0.0024;
 const NODE_ALTITUDE = 0.03;  // nodes sit 0.03 above globe surface
 
 // Hub (entanglement layer) — small center point beneath nodes
-const HUB_POINT_RADIUS = 0.0008;
-const HUB_INSET        = 0.008;  // how far below nodes (toward globe center)
+const HUB_POINT_RADIUS = 0.0016;
+const HUB_INSET        = 0.001;  // how far below nodes (toward globe center)
 
 // Colors — exported for use by interconnect/cascade modules
 export const COLOR_BLUE_NODE = 0x8cb4e0;
 export const COLOR_COPPER    = 0xd4a04a;
-const COLOR_HUB_DIM          = 0x8cb4e0; // same blue, rendered at very low opacity
+const COLOR_HUB_DIM          = 0x9a7530; // dark copper/yellow, rendered at low opacity
 
 // ─── Lat / lon → 3-D position ─────────────────────────────────────────────────
 export function latLonToVec3(lat, lon, r = GLOBE_RADIUS) {
@@ -32,22 +32,28 @@ export function latLonToVec3(lat, lon, r = GLOBE_RADIUS) {
   );
 }
 
+// ─── Smoothstep helper ──────────────────────────────────────────────────────
+function _ss(x) { const c = Math.max(0, Math.min(1, x)); return c * c * (3 - 2 * c); }
+
 // ─── Cluster data ─────────────────────────────────────────────────────────────
 // Each cluster is a city/station with 1-3 quantum nodes + a hub.
 const CLUSTERS = [
   // Southern Canada
   { name: 'Waterloo',      lat: 43.46, lon: -80.52,  count: 3, isHero: true,  revealT: 0    },
-  { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 2, isHero: false, revealT: 25.5, spacing: 0.010 },
-  { name: 'Montréal',      lat: 45.50, lon: -73.57,  count: 3, isHero: false, revealT: 25.5 },
-  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 29.5, spacing: 0.010 },
-  { name: 'Vancouver',     lat: 49.30, lon:-122.20,  count: 2, isHero: false, revealT: 29.5, spacing: 0.010 },
-  // Arctic ground stations — all coordinates pushed well inland to avoid water on globe texture
-  { name: 'Iqaluit',       lat: 66.00, lon: -68.50,  count: 2, isHero: false, revealT: 35.0, spacing: 0.010 },
-  { name: 'Yellowknife',   lat: 64.00, lon:-113.50,  count: 2, isHero: false, revealT: 35.0, spacing: 0.010 },
-  { name: 'Inuvik',        lat: 67.00, lon:-132.50,  count: 1, isHero: false, revealT: 35.0 },
-  { name: 'Alert',         lat: 80.00, lon: -72.00,  count: 1, isHero: false, revealT: 35.0 },
-  { name: 'Cambridge Bay', lat: 70.50, lon:-107.00,  count: 1, isHero: false, revealT: 35.0 },
-  { name: 'Churchill',     lat: 58.50, lon: -96.50,  count: 1, isHero: false, revealT: 35.0 },
+  { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 2, isHero: false, revealT: 23.0, spacing: 0.010 },
+  { name: 'Montréal',      lat: 45.50, lon: -73.57,  count: 3, isHero: false, revealT: 23.0 },
+  { name: 'Newfoundland',  lat: 48.50, lon: -55.50,  count: 2, isHero: false, revealT: 33.0, spacing: 0.010 },
+  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 42.0, spacing: 0.010 },
+  { name: 'Vancouver',     lat: 49.25, lon:-122.50,  count: 2, isHero: false, revealT: 42.0, spacing: 0.010 },
+  // Arctic ground stations
+  { name: 'Iqaluit',       lat: 63.75, lon: -68.70,  count: 2, isHero: false, revealT: 50.5, spacing: 0.010 },
+  { name: 'Yellowknife',   lat: 62.45, lon:-114.37,  count: 2, isHero: false, revealT: 50.5, spacing: 0.010 },
+  { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 1, isHero: false, revealT: 50.5 },
+  { name: 'Tuktoyaktuk',  lat: 69.45, lon:-133.30,  count: 1, isHero: false, revealT: 50.5 },
+  { name: 'Alert',         lat: 81.50, lon: -65.00,  count: 1, isHero: false, revealT: 50.5 },
+  { name: 'Cambridge Bay', lat: 69.12, lon:-105.06,  count: 1, isHero: false, revealT: 50.5 },
+  { name: 'Churchill',     lat: 58.77, lon: -94.40,  count: 1, isHero: false, revealT: 50.5 },
+  { name: 'Whitehorse',   lat: 60.72, lon:-135.05,  count: 1, isHero: false, revealT: 50.5 },
 ];
 
 // Satellite node — polar orbit over Canada (great-circle through the poles)
@@ -56,7 +62,7 @@ const CLUSTERS = [
 //   ~55° puts the satellite over central Canada at reveal
 // radius: orbital altitude above globe center (GLOBE_RADIUS = 2, so 3.5 = 75% above surface)
 const SATELLITES = [
-  { name: 'Sat-Polar', orbitLon: -100, startAngleDeg: 55, radius: 3.5, revealT: 45.0 },
+  { name: 'Sat-Polar', orbitLon: -100, startAngleDeg: 55, radius: 3.5, revealT: 59.0 },
 ];
 
 // No drone relay nodes — satellite bridges south↔north directly
@@ -2126,9 +2132,6 @@ export function createGlobe(scene, renderer) {
   );
   globeGroup.add(sphereMesh);
 
-  // ── 1b. Coastline outlines — resolution-independent sharp edges ──────────
-  buildCoastlineLines(globeGroup);
-
   // ── 2. Build node clusters ────────────────────────────────────────────────
   const nodeGeo  = new THREE.SphereGeometry(NODE_RADIUS, 32, 24);
   const glowGeo  = new THREE.SphereGeometry(NODE_RADIUS * 1.3, 16, 12);
@@ -2136,8 +2139,8 @@ export function createGlobe(scene, renderer) {
   // Satellite-specific geometry — much larger so it's visible at globe-shot distance
   // At camera distance 7.5, NODE_RADIUS (0.0024) is ~3 pixels — invisible.
   // 5x core (0.012) ≈ 14 pixels, 12x glow (0.029) ≈ 34 pixels — clearly visible.
-  const satNodeGeo = new THREE.SphereGeometry(NODE_RADIUS * 5, 32, 24);
-  const satGlowGeo = new THREE.SphereGeometry(NODE_RADIUS * 12, 16, 12);
+  const satNodeGeo = new THREE.SphereGeometry(NODE_RADIUS * 1.0, 32, 24);
+  const satGlowGeo = new THREE.SphereGeometry(NODE_RADIUS * 2.2, 16, 12);
 
   const nodes    = [];
   const clusters = [];
@@ -2154,7 +2157,7 @@ export function createGlobe(scene, renderer) {
       const isHeroNode = data.isHero && ni === 0; // first node in Waterloo is hero
 
       const mat = new THREE.MeshBasicMaterial({
-        color:       new THREE.Color(COLOR_BLUE_NODE),
+        color:       new THREE.Color(COLOR_COPPER),
         transparent: true,
         opacity:     1.0,
       });
@@ -2163,19 +2166,20 @@ export function createGlobe(scene, renderer) {
       mesh.position.copy(position);
       globeGroup.add(mesh);
 
-      // Faint outer glow — transparent sphere at 1.3x radius
+      // Faint outer glow — additive blending so it produces visible glow at distance
       const haloMat = new THREE.MeshBasicMaterial({
-        color:       COLOR_BLUE_NODE,
+        color:       COLOR_COPPER,
         transparent: true,
         opacity:     0.12,
         depthWrite:  false,
         side:        THREE.BackSide,
+        blending:    THREE.AdditiveBlending,
       });
       const halo = new THREE.Mesh(glowGeo, haloMat);
       mesh.add(halo);
 
-      // Start hidden unless this is a hero (Waterloo) node
-      if (!data.isHero) {
+      // Start hidden unless this is THE hero node (first in Waterloo)
+      if (!isHeroNode) {
         mesh.visible = false;
       }
 
@@ -2192,18 +2196,16 @@ export function createGlobe(scene, renderer) {
         isHero:      isHeroNode,
         isSatellite: false,
         isDrone:     false,
-        revealT:     data.revealT,
-        // Independent pulsing — deliberately varied frequencies
+        revealT:     data.isHero && !isHeroNode ? 13.0 : data.revealT,
         phase:     Math.random() * Math.PI * 2,
-        pulseFreq: 0.25 + Math.random() * 0.15, // 0.25–0.40 Hz range
-        baseEmissive: 1.0, // base brightness for pulse modulation
-        // Sync state — managed by interconnect module
-        syncState: 'independent', // 'independent' | 'syncing' | 'synced'
-        syncTarget: null,         // target phase value when syncing
-        syncFreq:  0.40,          // shared frequency when synced (0.40 Hz)
+        pulseFreq: 0.25,
+        baseEmissive: 1.0,
+        baseColor: new THREE.Color(COLOR_COPPER),
+        clusterSynced: false,
+        syncStartT: 0,
         // Cascade state
         cascadeConnected: false,
-        cascadeColor: new THREE.Color(COLOR_BLUE_NODE),
+        cascadeColor: new THREE.Color(COLOR_COPPER),
       };
 
       nodes.push(node);
@@ -2211,18 +2213,46 @@ export function createGlobe(scene, renderer) {
     }
 
     // ── Hub element — entanglement layer point at cluster center ────────
-    // Small glowing point beneath the nodes, represents shared quantum layer
-    const hubNormal = centerPos.clone().normalize();
-    const hubPos    = hubNormal.clone().multiplyScalar(GLOBE_RADIUS + NODE_ALTITUDE - HUB_INSET);
+    // Position at exact centroid of node positions, projected to same altitude
+    const nodeAvg = new THREE.Vector3();
+    for (const n of clusterNodes) nodeAvg.add(n.position);
+    nodeAvg.divideScalar(clusterNodes.length);
+    const hubNormal = nodeAvg.clone().normalize();
+    // Place at same altitude as nodes (no inset) so it sits in-plane with them
+    const hubPos    = hubNormal.clone().multiplyScalar(GLOBE_RADIUS + NODE_ALTITUDE);
 
-    const hubGeo = new THREE.SphereGeometry(HUB_POINT_RADIUS, 16, 12);
+    const hubGeo = new THREE.CircleGeometry(HUB_POINT_RADIUS, 6);
     const hubMat = new THREE.MeshBasicMaterial({
       color:       new THREE.Color(COLOR_HUB_DIM),
       transparent: true,
       opacity:     0.08,  // barely visible when inactive
+      side:        THREE.DoubleSide,
     });
     const hubMesh = new THREE.Mesh(hubGeo, hubMat);
     hubMesh.position.copy(hubPos);
+    // Orient flat hexagon to face outward from globe
+    hubMesh.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      hubNormal,
+    );
+    // Align hexagon: rotate around normal so a flat edge faces the first node (hero)
+    // This makes the hexagon look "straight" relative to the node triangle
+    if (clusterNodes.length > 0) {
+      const toNode = clusterNodes[0].position.clone().sub(hubPos);
+      // Project onto tangent plane (remove normal component)
+      toNode.addScaledVector(hubNormal, -toNode.dot(hubNormal));
+      if (toNode.length() > 0.0001) {
+        toNode.normalize();
+        // In local space after quaternion, the hexagon's first vertex points along +Y
+        // We want a flat edge facing the first node, so rotate to align
+        const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(hubMesh.quaternion);
+        const angle = Math.atan2(
+          toNode.dot(new THREE.Vector3().crossVectors(hubNormal, localUp)),
+          toNode.dot(localUp)
+        );
+        hubMesh.rotateOnAxis(new THREE.Vector3(0, 0, 1), angle);
+      }
+    }
     globeGroup.add(hubMesh);
 
     // All hubs start hidden — revealed by interconnect or by revealT fade
@@ -2236,6 +2266,12 @@ export function createGlobe(scene, renderer) {
       revealT:   data.revealT,
       nodes:     clusterNodes,
       activated: false, // set true when local interconnect fires
+      // Sync tracking — independent → cluster → global
+      leadPhase:         Math.random() * Math.PI * 2,
+      clusterSynced:     false,
+      clusterSyncStartT: 0,
+      citySynced:        false,
+      citySyncStartT:    0,
       // Hub (entanglement layer)
       hub: {
         mesh:     hubMesh,
@@ -2265,7 +2301,7 @@ export function createGlobe(scene, renderer) {
 
     // Larger core mesh — visible at globe-shot distance
     const mat = new THREE.MeshBasicMaterial({
-      color:       new THREE.Color(COLOR_BLUE_NODE),
+      color:       new THREE.Color(COLOR_COPPER),
       transparent: true,
       opacity:     1.0,
     });
@@ -2276,7 +2312,7 @@ export function createGlobe(scene, renderer) {
 
     // Bright additive glow halo — makes satellite pop against dark sky
     const haloMat = new THREE.MeshBasicMaterial({
-      color:       COLOR_BLUE_NODE,
+      color:       COLOR_COPPER,
       transparent: true,
       opacity:     0.25,
       depthWrite:  false,
@@ -2302,14 +2338,14 @@ export function createGlobe(scene, renderer) {
       isSatellite: true,
       isDrone:     false,
       revealT:     sat.revealT,
-      phase:       Math.random() * Math.PI * 2,
-      pulseFreq:   0.30 + Math.random() * 0.30,
+      phase:       0,
+      pulseFreq:   0.25,
       baseEmissive: 1.0,
-      syncState:   'independent',
-      syncTarget:  null,
-      syncFreq:    0.40,
+      baseColor:   new THREE.Color(0x9a7530),  // dark gold — never blue
+      clusterSynced: false,
+      syncStartT: 0,
       cascadeConnected: false,
-      cascadeColor: new THREE.Color(COLOR_BLUE_NODE),
+      cascadeColor: new THREE.Color(COLOR_COPPER),
     };
     nodes.push(node);
     satelliteNodes.push(node);
@@ -2323,7 +2359,7 @@ export function createGlobe(scene, renderer) {
     const position = latLonToVec3(drone.lat, drone.lon, drone.radius);
 
     const mat = new THREE.MeshBasicMaterial({
-      color:       new THREE.Color(COLOR_BLUE_NODE),
+      color:       new THREE.Color(COLOR_COPPER),
       transparent: true,
       opacity:     1.0,
     });
@@ -2334,11 +2370,12 @@ export function createGlobe(scene, renderer) {
     globeGroup.add(mesh);
 
     const haloMat = new THREE.MeshBasicMaterial({
-      color:       COLOR_BLUE_NODE,
+      color:       COLOR_COPPER,
       transparent: true,
       opacity:     0.10,
       depthWrite:  false,
       side:        THREE.BackSide,
+      blending:    THREE.AdditiveBlending,
     });
     mesh.add(new THREE.Mesh(droneGlowGeo, haloMat));
 
@@ -2358,14 +2395,13 @@ export function createGlobe(scene, renderer) {
       isSatellite: false,
       isDrone:     true,
       revealT:     drone.revealT,
-      phase:       Math.random() * Math.PI * 2,
-      pulseFreq:   0.30 + Math.random() * 0.30,
+      phase:       0,
+      pulseFreq:   0.25,
       baseEmissive: 1.0,
-      syncState:   'independent',
-      syncTarget:  null,
-      syncFreq:    0.40,
+      clusterSynced: false,
+      syncStartT: 0,
       cascadeConnected: false,
-      cascadeColor: new THREE.Color(COLOR_BLUE_NODE),
+      cascadeColor: new THREE.Color(COLOR_COPPER),
     };
     nodes.push(node);
     droneNodes.push(node);
@@ -2377,15 +2413,72 @@ export function createGlobe(scene, renderer) {
   scene.add(globeGroup);
 
   // ── Update called each frame ─────────────────────────────────────────────
-  const SYNC_LERP_RATE    = 3.0;   // phase converges in ~0.8s
   const SAT_ORBIT_SPEED   = 1.0;   // degrees/second along great-circle polar orbit
   const _copperColor = new THREE.Color(COLOR_COPPER);
   const _baseBlue    = new THREE.Color(COLOR_BLUE_NODE);
   const _dimBlue     = new THREE.Color(COLOR_BLUE_NODE).multiplyScalar(0.3);
 
-  function update(elapsed, dt, _progress = 1) {
-    const FADE_DUR = 1.0;
+  // ── Global breathing ────────────────────────────────────────────────────
+  const BREATH_FREQ = 0.20; // Hz — 5-second cycle, smooth breathing
+  const SYNC_DUR    = 1.5;  // seconds for phase convergence
+  const IC_CLUSTERS = new Set([
+    'Waterloo', 'Ottawa', 'Montréal', 'Newfoundland',
+    'Calgary', 'Vancouver', 'Iqaluit', 'Yellowknife',
+  ]); // all multi-node clusters with hexagon interconnect
+  let citySyncTriggered = false; // cross-cluster sync flag
 
+  // Network brightness: starts "kinda bright", increases as connections form
+  // Each connection event smoothly ramps brightness over 1.5s
+  const NB_EVENTS = [
+    [16.5, 0.05],  // Waterloo hexagon connects
+    [18.0, 0.04],  // Cascade connections
+    [24.5, 0.06],  // Ottawa + Montréal hexagons
+    [25.5, 0.05],  // City-to-city arcs (eastern)
+    [44.0, 0.05],  // City-to-city arcs (western + Arctic)
+  ];
+  function getNetworkBrightness(t) {
+    let b = 0.75; // "kinda bright" before any connections
+    for (const [et, add] of NB_EVENTS) {
+      if (t > et) b += add * Math.min((t - et) / 1.5, 1);
+    }
+    return Math.min(b, 1.0);
+  }
+
+  function update(elapsed, dt, _progress = 1, camera = null) {
+    const FADE_DUR = 1.0;
+    // Distance-based scale: nodes grow when camera is far so they stay visible
+    const camDist = camera ? camera.position.length() : 2.1;
+    const _distScale = Math.max(1, camDist / 2.1);
+
+    // Global breath target — final sync destination for all nodes
+    const globalPhase = elapsed * BREATH_FREQ * Math.PI * 2;
+    const globalBreath = (1 - Math.cos(globalPhase)) * 0.5;
+
+    // Distance factor: 0 when close (2.1), 1 when far (7.1)
+    const distFactor = _ss(Math.min(1, Math.max(0, (camDist - 2.1) / 5.0)));
+
+    // Progressive network brightness: grows as connections form
+    const networkBright = getNetworkBrightness(elapsed);
+
+    // ── Advance cluster lead phases & check cross-cluster sync ───────────
+    for (const cluster of clusters) {
+      if (cluster.clusterSynced) {
+        cluster.leadPhase += BREATH_FREQ * Math.PI * 2 * dt;
+      }
+    }
+    // Cross-cluster sync: once all 3 major clusters have hexagons, sync them
+    if (!citySyncTriggered) {
+      const majors = clusters.filter(c => IC_CLUSTERS.has(c.name));
+      if (majors.length > 0 && majors.every(c => c.clusterSynced)) {
+        citySyncTriggered = true;
+        for (const c of majors) {
+          c.citySynced = true;
+          c.citySyncStartT = elapsed + 0.5; // brief delay after last hex
+        }
+      }
+    }
+
+    // ── Per-node update ──────────────────────────────────────────────────
     for (const node of nodes) {
       // Staged reveal — fade in via opacity
       if (!node.isHero) {
@@ -2393,12 +2486,11 @@ export function createGlobe(scene, renderer) {
         node.mesh.visible = fade > 0;
         if (fade > 0) {
           node.mat.opacity = fade;
-          if (node.haloMat) node.haloMat.opacity = (node.isDrone ? 0.10 : node.isSatellite ? 0.25 : 0.12) * fade;
+          if (node.haloMat) node.haloMat.opacity = 0;
         }
       }
 
-      // Great-circle polar orbit — satellite moves along a true orbital arc
-      // Only orbit after reveal to prevent drift while invisible
+      // Great-circle polar orbit
       if (node.isSatellite && !node.orbitFrozen && elapsed >= node.revealT) {
         node.orbitalAngle += (SAT_ORBIT_SPEED * Math.PI / 180) * dt;
         const newPos = node.orbitRef.clone()
@@ -2408,38 +2500,74 @@ export function createGlobe(scene, renderer) {
         node.position.copy(newPos);
       }
 
-      // Pulsing — sinusoidal emission + subtle scale
+      // ── Pulsing — 3-stage sync for interconnect clusters, global for others ──
       if (node.mesh.visible || node.isHero) {
-        if (node.syncState === 'syncing') {
-          let diff = node.syncTarget - node.phase;
-          if (diff > Math.PI) diff -= Math.PI * 2;
-          if (diff < -Math.PI) diff += Math.PI * 2;
-          node.phase += diff * SYNC_LERP_RATE * dt;
-          node.pulseFreq += (node.syncFreq - node.pulseFreq) * SYNC_LERP_RATE * dt;
-          if (Math.abs(diff) < 0.05 && Math.abs(node.pulseFreq - node.syncFreq) < 0.01) {
-            node.syncState = 'synced';
-            node.phase = node.syncTarget;
-            node.pulseFreq = node.syncFreq;
+        let breath;
+        const cluster = node.clusterId >= 0 ? clusters[node.clusterId] : null;
+        const hasIC = cluster && IC_CLUSTERS.has(cluster.name);
+
+        if (hasIC && cluster.citySynced) {
+          // Stage 3: cross-cluster sync — converge to global phase
+          const syncAge = elapsed - cluster.citySyncStartT;
+          const syncT = _ss(Math.min(Math.max(syncAge, 0) / SYNC_DUR, 1));
+          if (syncT >= 1) {
+            breath = globalBreath;
+          } else {
+            const clBreath = (1 - Math.cos(cluster.leadPhase)) * 0.5;
+            breath = clBreath + (globalBreath - clBreath) * syncT;
           }
+        } else if (hasIC && cluster.clusterSynced) {
+          // Stage 2: cluster sync — nodes converge to cluster's lead phase
+          if (!node.syncStartT) node.syncStartT = elapsed;
+          const syncT = _ss(Math.min((elapsed - node.syncStartT) / SYNC_DUR, 1));
+          const clBreath = (1 - Math.cos(cluster.leadPhase)) * 0.5;
+          if (syncT >= 1) {
+            breath = clBreath;
+          } else {
+            node.phase += BREATH_FREQ * Math.PI * 2 * dt;
+            const indBreath = (1 - Math.cos(node.phase)) * 0.5;
+            breath = indBreath + (clBreath - indBreath) * syncT;
+          }
+        } else if (hasIC) {
+          // Stage 1: independent — each node at its own phase (before hexagon)
+          node.phase += BREATH_FREQ * Math.PI * 2 * dt;
+          breath = (1 - Math.cos(node.phase)) * 0.5;
+        } else {
+          // All other nodes (non-interconnect): global phase
+          breath = globalBreath;
         }
 
-        node.phase += node.pulseFreq * Math.PI * 2 * dt;
-        const sinVal = Math.sin(node.phase);
-
-        // Emission pulse — barely perceptible, keeps things alive
-        const brightness = (0.92 + 0.08 * sinVal) * (node.baseEmissive || 1.0);
+        // ── Pulsing (same for all nodes) ────────────────────────────────
+        const nB = networkBright * (node.baseEmissive || 1.0);
         const base = node.baseColor || _baseBlue;
-        node.mat.color.copy(base).multiplyScalar(brightness);
 
-        // Subtle scale pulse — barely visible
-        const scalePulse = 1 + 0.01 * sinVal;
-        node.mesh.scale.setScalar(scalePulse);
+        // Brightness: very punchy far away, gentle close up
+        // Hero node gets a boost in both regimes so it stands out
+        const briFar   = node.isHero ? (1.45 + 0.55 * breath) : (1.15 + 0.45 * breath);
+        const briClose = node.isHero ? (0.91 + 0.11 * breath) : (0.85 + 0.12 * breath);
+        const briRange = briClose + (briFar - briClose) * distFactor;
+        const bri = nB * briRange;
+        node.mat.color.copy(base).multiplyScalar(bri);
 
-        // Halo pulses inversely (brighter when node dims slightly, for glow effect)
-        if (node.haloMat) {
-          const baseHaloOp = node.haloBoost ? 0.4 : (node.isDrone ? 0.10 : node.isSatellite ? 0.25 : 0.12);
-          node.haloMat.opacity = baseHaloOp * (0.7 + 0.3 * sinVal);
+        // Scale pulse: 8% close up, up to 20% far away
+        const scaleAmp = 0.08 + distFactor * 0.12;
+        const scalePulse = 1 + scaleAmp * breath;
+
+        // Hero-only opening size boost: 2.5× during globe shot (0-4s), eases to 1× during zoom
+        const heroSizeMul = node.isHero && elapsed < 8
+          ? (elapsed < 4 ? 2.5 : 2.5 - 1.5 * _ss((elapsed - 4) / 4))
+          : 1.0;
+
+        // Wide Canada zoom-out: ease in 48-50.5s, 1.8× from 50.5s onward (permanent)
+        let wideSizeMul = 1.0;
+        if (elapsed >= 48) {
+          wideSizeMul = elapsed < 50.5 ? 1.0 + 0.8 * _ss((elapsed - 48) / 2.5) : 1.8;
         }
+
+        node.mesh.scale.setScalar(scalePulse * _distScale * heroSizeMul * wideSizeMul);
+
+        // Halos disabled
+        if (node.haloMat) node.haloMat.opacity = 0;
       }
     }
 
@@ -2453,17 +2581,18 @@ export function createGlobe(scene, renderer) {
       if (hubFade <= 0) continue;
 
       if (hub.active) {
-        // Active: copper glow, gentle pulse synced with cluster
-        hub.mat.color.lerp(_copperColor, 8.0 * dt);
+        // Active: color managed by interconnect.js (copper → bright yellow transition)
+        // Opacity fade-in and gentle breathing pulse (consistent with nodes)
         hub.mat.opacity += (1.0 - hub.mat.opacity) * 4.0 * dt;
-        const refPhase = cluster.nodes[0] ? cluster.nodes[0].phase : 0;
-        const hubPulse = 1 + 0.06 * Math.sin(refPhase);
+        const hubBreath = globalBreath;
+        const hubPulse = 1 + 0.04 * hubBreath;
         hub.mesh.scale.setScalar(hubPulse);
       } else {
         // Inactive: very dim, barely visible
         hub.mat.opacity = 0.08 * hubFade;
       }
     }
+
   }
 
   return {

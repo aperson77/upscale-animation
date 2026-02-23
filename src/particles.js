@@ -3,48 +3,46 @@
  *
  * A single node attempts a complex computation and fails.
  *
- * 0–0.5s:     Quiet hero node, subtle pulse.
- * 0.5–3.5s:   A compact hexagonal grid/mesh GROWS outward from the node
- *             (2–3 node-widths radius). Concentric WAVE PULSES ripple
- *             outward from the node every ~0.55s, lighting up grid lines
- *             and intersection points as they pass. Data dots flow along
- *             edges. Grid is dense near the node, fading at the perimeter.
- * 3.5–4.5s:   GLITCH FAILURE — digital corruption from outer edges inward.
- *             Waves stutter and fragment. Grid sections blink, jitter, die.
- * 4.5–5.0s:   Other Waterloo nodes + hub fade in.
+ * 0–2.5s:    Quiet hero node, subtle pulse.
+ * 2.5–9.0s:  A rectangular grid GROWS outward from the node.
+ *            Grid sites gently pulse/vibrate to show "action."
+ *            Concentric WAVE PULSES ripple outward. Data dots flow
+ *            along edges. Grid dims with Gaussian fade at edges
+ *            to suggest scalability.
+ * 9.0–11.0s: GLITCH FAILURE — digital corruption from outer edges inward.
+ *            Grid sections blink, jitter, die. Failure is obvious.
+ * 11.0s:     Other Waterloo nodes + hub fade in.
  */
 
 import * as THREE from 'three';
 
 // ─── Colors ─────────────────────────────────────────────────────────────────
-const NODE_COLOR = 0x8cb4e0;
 const GRID_COLOR = new THREE.Color(0.4, 0.6, 1.0);    // blue-white grid lines
 const VERT_COLOR = new THREE.Color(0.55, 0.75, 1.0);  // brighter intersections
 const DOT_COLOR  = new THREE.Color(0.85, 0.93, 1.0);  // bright data pulses
 
 // ─── Timing ─────────────────────────────────────────────────────────────────
-const BUILD_START    = 0.5;
-const BUILD_END      = 7.0;   // lattice extends over this period
-const COLLAPSE_START = 7.0;   // lattice fully built → glitch
-const COLLAPSE_END   = 9.0;   // 2s glitch — dramatic failure
-const OTHERS_REVEAL  = 9.0;
+const BUILD_START     = 8.5;   // grid appears after zoom-in lands on close-up (t=8)
+const BUILD_END       = 13.0;  // grid fully extended (4.5s slow build — each ring takes its time)
+const GRID_FADE_START = 13.0;  // fade begins as camera starts pulling back to 3 nodes
+const GRID_FADE_END   = 15.0;  // fully gone by the time zoom-out completes
 
 // ─── Grid config ────────────────────────────────────────────────────────────
-// Tight grid for close-up framing (FOV 24°)
-const HEX_RINGS    = 4;
-const HEX_SPACING  = 0.0016;
-const MAX_RADIUS   = HEX_RINGS * HEX_SPACING;  // 0.0052
-const FADE_START   = MAX_RADIUS * 0.5;          // radial fade begins at 50%
+// Rectangular grid for close-up framing (FOV 24°)
+const GRID_HALF    = 3;                             // -3 to +3 = 7×7 grid
+const GRID_SPACING = 0.0014;
+const MAX_RADIUS   = GRID_HALF * GRID_SPACING;      // furthest point
+const GAUSS_SIGMA  = MAX_RADIUS * 0.55;              // Gaussian fall-off width
 
 const VERT_SIZE = 0.0019;
 const DOT_SIZE  = 0.0020;
 const DOT_COUNT = 20;
 
 // ─── Wave pulse config ──────────────────────────────────────────────────────
-const WAVE_INTERVAL  = 0.55;   // new wave every 0.55s — brisk at start
-const WAVE_SPEED     = 0.014;  // radial expansion (units/sec) — faster initially
-const WAVE_WIDTH     = 0.003;  // ring thickness — wider, softer
-const WAVE_INTENSITY = 1.0;    // peak brightness — subtle glow, not flash
+const WAVE_INTERVAL  = 0.85;   // new wave every 0.85s (slower, more stately)
+const WAVE_SPEED     = 0.009;  // radial expansion (units/sec) — slower ripples
+const WAVE_WIDTH     = 0.004;  // ring thickness (wider for softer look)
+const WAVE_INTENSITY = 1.0;    // peak brightness
 
 // ─── Seeded PRNG ────────────────────────────────────────────────────────────
 function createRNG(seed) {
@@ -52,13 +50,6 @@ function createRNG(seed) {
     seed = (seed * 1664525 + 1013904223) & 0x7fffffff;
     return seed / 0x7fffffff;
   };
-}
-
-// ─── Fast integer hash (glitch randomness) ──────────────────────────────────
-function hash(n) {
-  n = ((n >> 16) ^ n) * 0x45d9f3b | 0;
-  n = ((n >> 16) ^ n) * 0x45d9f3b | 0;
-  return ((n >> 16) ^ n) & 0x7fffffff;
 }
 
 // ─── Round point texture ────────────────────────────────────────────────────
@@ -79,16 +70,12 @@ function createCircleTexture() {
 }
 
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-function hexDist(q, r) { return Math.max(Math.abs(q), Math.abs(r), Math.abs(q + r)); }
 
 // ─── createAct1Animations ───────────────────────────────────────────────────
 export function createAct1Animations(globeGroup, heroNode, clusters) {
   const rand  = createRNG(42);
   const group = new THREE.Group();
   globeGroup.add(group);
-
-  // All Waterloo nodes are always visible — during the single-node close-up
-  // the other nodes are simply out of frame due to camera framing.
 
   const heroPos   = heroNode.position.clone();
   const normal    = heroPos.clone().normalize();
@@ -104,51 +91,50 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
       .addScaledVector(normal, h);
   }
 
-  // ── Generate hex grid vertices ──────────────────────────────────────────
+  // ── Generate rectangular grid vertices ────────────────────────────────
   const verts   = [];
   const vertMap = new Map();
 
-  for (let q = -HEX_RINGS; q <= HEX_RINGS; q++) {
-    for (let r = -HEX_RINGS; r <= HEX_RINGS; r++) {
-      const ring = hexDist(q, r);
-      if (ring > HEX_RINGS) continue;
-
-      const x    = HEX_SPACING * (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r);
-      const y    = HEX_SPACING * (1.5 * r);
+  for (let row = -GRID_HALF; row <= GRID_HALF; row++) {
+    for (let col = -GRID_HALF; col <= GRID_HALF; col++) {
+      const x    = col * GRID_SPACING;
+      const y    = row * GRID_SPACING;
       const dist = Math.sqrt(x * x + y * y);
+      const ring = Math.max(Math.abs(col), Math.abs(row)); // Chebyshev distance
       const h    = 0.004 + ring * 0.0003;
 
-      // Radial fade: bright at center, fading at perimeter
-      const radialFade = dist <= FADE_START
-        ? 1
-        : Math.max(0, 1 - (dist - FADE_START) / (MAX_RADIUS - FADE_START));
+      // Gaussian fade: bright at center, smoothly dimming at edges
+      const radialFade = Math.exp(-(dist * dist) / (2 * GAUSS_SIGMA * GAUSS_SIGMA));
 
-      // Reveal time: inner rings first
-      const revealT = BUILD_START + (ring / HEX_RINGS) * (BUILD_END - BUILD_START - 0.8);
+      // Reveal time: inner cells first
+      const revealT = BUILD_START + (ring / GRID_HALF) * (BUILD_END - BUILD_START - 0.8);
+
+      // Per-vertex pulse phase (varied so sites don't pulse in unison)
+      const pulsePhase = (col * 2.7 + row * 3.1) % (Math.PI * 2);
 
       const idx = verts.length;
-      vertMap.set(`${q},${r}`, idx);
+      vertMap.set(`${col},${row}`, idx);
       verts.push({
-        idx, q, r, ring, dist,
+        idx, col, row, ring, dist,
         baseX: x, baseY: y, h,
         worldPos: toWorld(x, y, h),
-        revealT, radialFade,
+        revealT, radialFade, pulsePhase,
       });
     }
   }
 
-  // ── Generate edges ──────────────────────────────────────────────────────
-  const ADJ   = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  // ── Generate edges (4-connected: right and down only to avoid dupes) ──
+  const ADJ   = [[1, 0], [0, 1]];
   const edges = [];
 
   for (const v of verts) {
-    for (const [dq, dr] of ADJ) {
-      const nIdx = vertMap.get(`${v.q + dq},${v.r + dr}`);
-      if (nIdx === undefined || v.idx >= nIdx) continue;
+    for (const [dc, dr] of ADJ) {
+      const nIdx = vertMap.get(`${v.col + dc},${v.row + dr}`);
+      if (nIdx === undefined) continue;
 
       const nv       = verts[nIdx];
       const edgeRing = Math.max(v.ring, nv.ring);
-      const edgeDist = (v.dist + nv.dist) / 2; // midpoint distance for waves
+      const edgeDist = (v.dist + nv.dist) / 2;
       const revealT  = Math.max(v.revealT, nv.revealT);
       const radialFade = Math.min(v.radialFade, nv.radialFade);
 
@@ -206,8 +192,8 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
   for (let d = 0; d < DOT_COUNT; d++) {
     dotInfos.push({
       edgeIdx: Math.floor(rand() * nEdges),
-      speed:   0.65 + rand() * 0.55,
-      pos:     rand(),   // accumulated position 0→1, updated with dt
+      speed:   0.40 + rand() * 0.35,   // slower data flow
+      pos:     rand(),
     });
   }
 
@@ -223,24 +209,21 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
     depthWrite: false, vertexColors: true,
   });
   const dotMesh = new THREE.Points(dGeo, dMat);
+  dotMesh.visible = false;  // dots disabled — grid uses waves + vertex breathing only
   group.add(dotMesh);
 
   // ── Reusable vector ───────────────────────────────────────────────────────
   const _p = new THREE.Vector3();
 
   // ── Wave pulse brightness ─────────────────────────────────────────────────
-  // Returns extra brightness from wave pulses at a given radial distance.
   const FIRST_WAVE = BUILD_START + 0.3;
-  const MAX_WAVE_AGE = MAX_RADIUS / WAVE_SPEED * 1.5; // time for wave to exit grid
+  const MAX_WAVE_AGE = MAX_RADIUS / WAVE_SPEED * 1.5;
 
-  function getWaveBright(elapsed, dist, baseX, baseY) {
+  function getWaveBright(elapsed, dist) {
     if (elapsed < FIRST_WAVE) return 0;
 
-    const collapseP = elapsed >= COLLAPSE_START
-      ? (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START)
-      : 0;
+    if (elapsed >= GRID_FADE_END) return 0;
 
-    // Build progress: as lattice extends, everything slows
     const buildP = elapsed < BUILD_START ? 0
       : elapsed < BUILD_END ? (elapsed - BUILD_START) / (BUILD_END - BUILD_START)
       : 1;
@@ -255,17 +238,6 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
       const age   = elapsed - waveT;
       if (age < 0) continue;
 
-      // During collapse: waves skip and fragment
-      if (collapseP > 0) {
-        const h1 = hash(wi * 777);
-        if (h1 % 3 === 0) continue;
-
-        const angle  = Math.atan2(baseY, baseX);
-        const sector = hash(wi * 333 + Math.floor((angle + Math.PI) * 3));
-        if (sector % 5 < collapseP * 5) continue;
-      }
-
-      // Waves slow as lattice extends — speed drops to 20% at full build
       const waveSlowdown = 1 - buildP * buildP * 0.8;
       const radius   = age * WAVE_SPEED * waveSlowdown;
       const waveFade = Math.max(0, 1 - radius / (MAX_RADIUS * 1.2));
@@ -277,15 +249,19 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
       }
     }
 
-    // Waves dim as lattice grows, further during collapse
     const buildDim = 1 - buildP * buildP * 0.4;
-    return peak * WAVE_INTENSITY * buildDim * (1 - collapseP * 0.7);
+    return peak * WAVE_INTENSITY * buildDim;
   }
 
   // ── Per-frame update ──────────────────────────────────────────────────────
   function update(elapsed, dt) {
+    // Past grid end — hide everything instantly
+    if (elapsed >= GRID_FADE_END) {
+      vertexPoints.visible = false;
+      edgeLines.visible    = false;
+      return;
+    }
 
-    const glitchFrame = Math.floor(elapsed * 30);  // 30fps — digital choppy
     let anyVisible = false;
 
     // ── Update vertices ─────────────────────────────────────────────────
@@ -301,58 +277,33 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
 
       const fadeIn = Math.min(revealAge / 0.3, 1);
 
-      // Base brightness: steady during build, no pulsing
-      const baseBright = 0.30;
+      // Base brightness with breathing (consistent with globe nodes)
+      const siteBreath = (1 - Math.cos(elapsed * 1.2 + v.pulsePhase)) * 0.5;
+      const sitePulse = 0.85 + 0.30 * siteBreath;
+      const baseBright = 0.40 * sitePulse;
 
-      // Wave brightness — gentle glow, not blinking
-      const waveBright = getWaveBright(elapsed, v.dist, v.baseX, v.baseY) * 0.5;
+      // Wave brightness
+      const waveBright = getWaveBright(elapsed, v.dist) * 0.5;
 
       let bright = (baseBright + waveBright) * fadeIn * v.radialFade;
-      let jitterX = 0, jitterY = 0;
-      let dead = false;
 
-      // ── Progressive strain — grid dims more as it extends ─────────
-      if (elapsed >= BUILD_START && elapsed < COLLAPSE_START) {
+      // Gentle vibration at grid sites (tiny position wobble)
+      const vibeX = Math.sin(elapsed * 1.8 + v.pulsePhase) * 0.00003 * v.radialFade;
+      const vibeY = Math.cos(elapsed * 1.5 + v.pulsePhase * 1.3) * 0.00003 * v.radialFade;
+
+      // ── Progressive strain — grid dims slightly as it extends ────
+      if (elapsed >= BUILD_START && elapsed < BUILD_END) {
         const bP = (elapsed - BUILD_START) / (BUILD_END - BUILD_START);
-        // Quadratic curve: subtle at first, obvious by the end
-        bright *= 1 - bP * bP * 0.4;
+        bright *= 1 - bP * bP * 0.2;  // only 20% dim at full extent
       }
 
-      // ── Glitch during collapse ──────────────────────────────────────
-      if (elapsed >= COLLAPSE_START) {
-        const cP    = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
-        // Outer rings die first, inner rings last
-        const delay = (HEX_RINGS - v.ring) / HEX_RINGS * 0.4;
-        const gT    = Math.max(0, (cP - delay) / (1 - delay));
-
-        if (gT >= 0.85) {
-          dead = true;
-        } else if (gT > 0) {
-          // Per-vertex sporadic digital glitch
-          const h1 = hash(v.idx * 1000 + glitchFrame);
-          const h2 = hash(v.idx * 2000 + glitchFrame);
-
-          // Blink off — increasing probability as collapse progresses
-          const blinkChance = gT * 8;
-          if ((h1 % 10) < blinkChance) {
-            bright = 0;
-          } else {
-            bright *= (1 - gT * 0.6);
-          }
-
-          // Jitter — vertices scatter outward
-          jitterX = ((h1 % 200) / 200 - 0.5) * gT * 0.003;
-          jitterY = ((h2 % 200) / 200 - 0.5) * gT * 0.003;
-
-          // White flash — rare bright spike
-          const flashH = hash(v.idx * 5000 + Math.floor(elapsed * 15));
-          if ((flashH % 5) === 0 && gT > 0.3 && bright > 0) {
-            bright = 2.0;
-          }
-        }
+      // ── Fade out during zoom-out to 3 nodes ─────────────────────
+      if (elapsed >= GRID_FADE_START) {
+        const fadeP = (elapsed - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START);
+        bright *= 1 - Math.min(fadeP, 1);
       }
 
-      if (dead) {
+      if (bright < 0.001) {
         vColArr[i3] = vColArr[i3 + 1] = vColArr[i3 + 2] = 0;
         vPosArr[i3] = v.worldPos.x; vPosArr[i3 + 1] = v.worldPos.y; vPosArr[i3 + 2] = v.worldPos.z;
         continue;
@@ -364,10 +315,11 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
       vColArr[i3 + 1] = VERT_COLOR.g * bright;
       vColArr[i3 + 2] = VERT_COLOR.b * bright;
 
-      if (jitterX !== 0 || jitterY !== 0) {
+      // Apply vibration to position
+      if (vibeX !== 0 || vibeY !== 0) {
         _p.copy(v.worldPos)
-          .addScaledVector(tangent, jitterX)
-          .addScaledVector(bitangent, jitterY);
+          .addScaledVector(tangent, vibeX)
+          .addScaledVector(bitangent, vibeY);
         vPosArr[i3] = _p.x; vPosArr[i3 + 1] = _p.y; vPosArr[i3 + 2] = _p.z;
       } else {
         vPosArr[i3] = v.worldPos.x; vPosArr[i3 + 1] = v.worldPos.y; vPosArr[i3 + 2] = v.worldPos.z;
@@ -394,48 +346,31 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
         continue;
       }
 
-      // Edge draws outward from inner vertex
-      const drawT = Math.min(revealAge / 0.35, 1);
+      const drawT = Math.min(revealAge / 0.6, 1);  // slower edge draw-in
       const drawE = easeOutCubic(drawT);
 
-      // Base + wave brightness — steady, no flickering
       const baseBright = 0.25;
-      const waveBright = getWaveBright(elapsed, edge.dist, 0, 0) * 0.4;
+      const waveBright = getWaveBright(elapsed, edge.dist) * 0.4;
       let bright = (baseBright + waveBright) * drawE * edge.radialFade;
-      let dead = false;
 
-      // ── Progressive strain — edges dim as grid extends ────────────
-      if (elapsed >= BUILD_START && elapsed < COLLAPSE_START) {
+      if (elapsed >= BUILD_START && elapsed < BUILD_END) {
         const bP = (elapsed - BUILD_START) / (BUILD_END - BUILD_START);
-        bright *= 1 - bP * bP * 0.4;
+        bright *= 1 - bP * bP * 0.2;
       }
 
-      // ── Glitch ──────────────────────────────────────────────────────
-      if (elapsed >= COLLAPSE_START) {
-        const cP    = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
-        const delay = (HEX_RINGS - edge.ring) / HEX_RINGS * 0.35;
-        const gT    = Math.max(0, (cP - delay) / (1 - delay));
-
-        if (gT >= 0.85) {
-          dead = true;
-        } else if (gT > 0) {
-          const h1 = hash(ei * 3000 + glitchFrame);
-          if ((h1 % 10) < gT * 8) {
-            bright = 0;
-          } else {
-            bright *= (1 - gT * 0.6);
-          }
-        }
+      // Fade out during zoom-out
+      if (elapsed >= GRID_FADE_START) {
+        const fadeP = (elapsed - GRID_FADE_START) / (GRID_FADE_END - GRID_FADE_START);
+        bright *= 1 - Math.min(fadeP, 1);
       }
 
-      if (dead) {
+      if (bright < 0.001) {
         for (let k = 0; k < 6; k++) eColArr[e0 + k] = 0;
         continue;
       }
 
-      if (bright > 0.001) anyVisible = true;
+      anyVisible = true;
 
-      // Positions
       const ax = vPosArr[aI3], ay = vPosArr[aI3 + 1], az = vPosArr[aI3 + 2];
       const bx = vPosArr[bI3], by = vPosArr[bI3 + 1], bz = vPosArr[bI3 + 2];
 
@@ -473,33 +408,20 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
         continue;
       }
 
-      let dotAlive = true;
       let slowdown = 1;
 
-      // Dots progressively slow as lattice extends — stopped by BUILD_END
       if (elapsed >= BUILD_START && elapsed < BUILD_END) {
         const bP = (elapsed - BUILD_START) / (BUILD_END - BUILD_START);
-        // Cubic: fast at first, obviously slowing in second half, stopped at end
         slowdown = Math.max(0, 1 - bP * bP * bP);
       } else if (elapsed >= BUILD_END) {
-        slowdown = 0; // fully stopped
+        slowdown = 0;
       }
 
-      if (elapsed >= COLLAPSE_START) {
-        const cP    = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
-        const delay = (HEX_RINGS - edge.ring) / HEX_RINGS * 0.35;
-        const gT    = Math.max(0, (cP - delay) / (1 - delay));
-        if (gT >= 0.65) dotAlive = false;
-      }
+      // Dots disabled but keeping loop structure
+      let dotFade = 1;
 
-      if (!dotAlive) {
-        dColArr[d3] = dColArr[d3 + 1] = dColArr[d3 + 2] = 0;
-        continue;
-      }
-
-      // Accumulate position with dt — no jumps, smooth slowdown
       dot.pos += dot.speed * slowdown * dt;
-      if (dot.pos > 1) dot.pos -= 1; // wrap smoothly
+      if (dot.pos > 1) dot.pos -= 1;
 
       const t = dot.pos;
 
@@ -510,7 +432,7 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
       dPosArr[d3 + 1] = ay + (by - ay) * t;
       dPosArr[d3 + 2] = az + (bz - az) * t;
 
-      const dotBright = 0.8 * edge.radialFade;
+      const dotBright = 0.8 * edge.radialFade * dotFade;
       dColArr[d3]     = DOT_COLOR.r * dotBright;
       dColArr[d3 + 1] = DOT_COLOR.g * dotBright;
       dColArr[d3 + 2] = DOT_COLOR.b * dotBright;
@@ -520,28 +442,10 @@ export function createAct1Animations(globeGroup, heroNode, clusters) {
     dGeo.attributes.color.needsUpdate    = true;
 
     // ── Visibility ──────────────────────────────────────────────────────
-    const show = anyVisible || elapsed < COLLAPSE_END;
+    const show = (anyVisible || (elapsed >= BUILD_START && elapsed < GRID_FADE_END));
     vertexPoints.visible = show;
     edgeLines.visible    = show;
-    dotMesh.visible      = show;
-
-    // ── Hero node dims during collapse ──────────────────────────────────
-    if (elapsed >= COLLAPSE_START && elapsed < COLLAPSE_END) {
-      const dimT = (elapsed - COLLAPSE_START) / (COLLAPSE_END - COLLAPSE_START);
-      // Dims to ~0.6 as grid fails, then recovers in last 30%
-      if (dimT < 0.7) {
-        heroNode.mat.color.setHex(NODE_COLOR).multiplyScalar(1.0 - dimT * 0.6);
-      } else {
-        const rT = (dimT - 0.7) / 0.3;
-        heroNode.mat.color.setHex(NODE_COLOR).multiplyScalar(0.58 + rT * 0.42);
-      }
-    }
-
-    // ── After collapse: resting state ───────────────────────────────────
-    if (elapsed >= COLLAPSE_END && elapsed < OTHERS_REVEAL + 0.5) {
-      heroNode.mat.color.setHex(NODE_COLOR);
-      heroNode.mesh.scale.setScalar(1);
-    }
+    // dotMesh stays hidden — no moving dots on grid
   }
 
   return { group, verts, edges, update };
