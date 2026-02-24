@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "mp4-muxer": "^5.2.2",
     "three": "^0.169.0",
     "webm-muxer": "^5.1.4"
   },

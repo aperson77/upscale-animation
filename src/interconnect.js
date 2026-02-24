@@ -707,25 +707,25 @@ export function createInterconnect(globeGroup, clusters) {
     tryBuild('Montréal', {
       ignitionT: 23.5, connDrawDur: 0.6, flowSpeed: 0.9, skipLattice: true,
     }),
-    // Newfoundland — tubes + pulses only, fires at start of regional view
-    tryBuild('Newfoundland', {
+    // St. John's — tubes + pulses only, fires at start of coast-to-coast view
+    tryBuild("St. John's", {
       ignitionT: 33.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
     }),
-    // Calgary — tubes + pulses only, fires at start of west view
+    // Calgary — tubes + pulses only, fires at start of coast-to-coast view
     tryBuild('Calgary', {
-      ignitionT: 42.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+      ignitionT: 33.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
     }),
-    // Vancouver — tubes + pulses only, fires at start of west view
+    // Vancouver — tubes + pulses only, fires at start of coast-to-coast view
     tryBuild('Vancouver', {
-      ignitionT: 42.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+      ignitionT: 33.5, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
     }),
     // Iqaluit — tubes + pulses only, fires at start of Canada-wide view
     tryBuild('Iqaluit', {
-      ignitionT: 51.0, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+      ignitionT: 45.0, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
     }),
     // Yellowknife — tubes + pulses only, fires at start of Canada-wide view
     tryBuild('Yellowknife', {
-      ignitionT: 51.0, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
+      ignitionT: 45.0, connDrawDur: 0.5, flowSpeed: 1.0, skipLattice: true,
     }),
   ].filter(Boolean);
 

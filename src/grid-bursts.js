@@ -7,9 +7,9 @@
  * at each intersection — clearly visible at the zoomed-out camera distance.
  *
  * Bursts:
- *   37.0s  +Newfoundland connected   (during regional hold 35-39)
- *   43.0s  +Calgary/Vancouver        (during west hold 41.5-44.5)
- *   48.0s  All Canada                (during Canada-wide hold 46.5-49)
+ *   27.0s  3-city (Waterloo/Ottawa/Montréal)
+ *   37.5s  Coast-to-coast (NF + Calgary + Vancouver join)
+ *   55.0s  All Canada
  */
 
 import * as THREE from 'three';
@@ -55,20 +55,15 @@ const BURST_DEFS = [
     viewDist: 2.7,
   },
   {
-    t: 37.0, dur: 2.5,
-    cities: ['Waterloo', 'Ottawa', 'Montréal', 'Newfoundland'],
-    height: 0.006,
-    viewDist: 3.2,
-  },
-  {
-    t: 46.0, dur: 2.0,
-    cities: ['Waterloo', 'Ottawa', 'Montréal', 'Newfoundland', 'Calgary', 'Vancouver'],
+    t: 37.5, dur: 3.0,
+    cities: ['Waterloo', 'Ottawa', 'Montréal', "St. John's", 'Calgary', 'Vancouver'],
     height: 0.008,
-    viewDist: 3.5,
-    targetCells: 45,   // smaller squares for wider view
+    viewDist: 4.0,
+    targetCells: 65,   // smaller squares for coast-to-coast view
+    flat: true,        // camera-aligned grid orientation
   },
   {
-    t: 55.0, dur: 3.5,
+    t: 49.0, dur: 3.5,
     allCanada: true,
     height: 0.012,
     viewDist: 4.5,
@@ -78,7 +73,7 @@ const BURST_DEFS = [
 
 // ─── Canadian city names ────────────────────────────────────────────────────
 const CANADA_CITIES = [
-  'Waterloo', 'Ottawa', 'Montréal', 'Newfoundland', 'Calgary', 'Vancouver',
+  'Waterloo', 'Ottawa', 'Montréal', "St. John's", 'Calgary', 'Vancouver',
   'Iqaluit', 'Yellowknife', 'Inuvik', 'Tuktoyaktuk', 'Alert',
   'Cambridge Bay', 'Churchill', 'Whitehorse',
 ];
@@ -87,7 +82,7 @@ function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 // ─── Single grid burst ─────────────────────────────────────────────────────
 class GridBurst {
-  constructor(globeGroup, center, halfW, halfH, spacing, pointSize, height) {
+  constructor(globeGroup, center, halfW, halfH, spacing, pointSize, height, flat = false, camera = null) {
     this.group = new THREE.Group();
     globeGroup.add(this.group);
 
@@ -95,16 +90,32 @@ class GridBurst {
 
     // Tangent frame at the centroid on the sphere
     const normal = center.clone().normalize();
-    const tangent = new THREE.Vector3()
-      .crossVectors(new THREE.Vector3(0, 1, 0), normal);
-    if (tangent.length() < 0.01) {
-      tangent.crossVectors(new THREE.Vector3(1, 0, 0), normal);
+    let tangent, bitangent;
+
+    if (flat && camera) {
+      // Align grid with screen axes: project camera right/up onto the tangent plane
+      // so grid lines appear perfectly horizontal/vertical on screen
+      camera.updateMatrixWorld();
+      const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const camUp    = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      // Project onto tangent plane (remove component along surface normal)
+      tangent   = camRight.clone().addScaledVector(normal, -camRight.dot(normal)).normalize();
+      bitangent = camUp.clone().addScaledVector(normal, -camUp.dot(normal)).normalize();
+    } else {
+      tangent = new THREE.Vector3()
+        .crossVectors(new THREE.Vector3(0, 1, 0), normal);
+      if (tangent.length() < 0.01) {
+        tangent.crossVectors(new THREE.Vector3(1, 0, 0), normal);
+      }
+      tangent.normalize();
+      bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
     }
-    tangent.normalize();
-    const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
 
     const surfaceR = GLOBE_RADIUS + 0.03 + height;
 
+    // Always project onto sphere surface (follows globe curvature).
+    // When camera-aligned, tangent/bitangent come from camera axes
+    // so the grid orientation matches the screen while curving with the globe.
     function toWorld(x, y) {
       const p = center.clone()
         .addScaledVector(tangent, x)
@@ -319,92 +330,87 @@ class GridBurst {
 }
 
 // ─── createGridBursts ───────────────────────────────────────────────────────
-export function createGridBursts(globeGroup, clusters) {
+export function createGridBursts(globeGroup, clusters, camera) {
   const clusterMap = {};
   for (const c of clusters) clusterMap[c.name] = c;
 
-  const bursts = [];
-  let initialized = false;
+  // Per-burst lazy init: each burst inits right before it fires so the camera
+  // is at the correct position for screen-aligned flat grids.
+  const burstSlots = BURST_DEFS.map(def => ({ def, burst: null, t: def.t, dur: def.dur }));
 
-  function init() {
-    for (const def of BURST_DEFS) {
-      let cityNames;
-      if (def.allCanada) {
-        cityNames = CANADA_CITIES;
-      } else {
-        cityNames = def.cities;
-      }
+  function initBurst(slot) {
+    const def = slot.def;
+    const cityNames = def.allCanada ? CANADA_CITIES : def.cities;
 
-      // Get hub positions in globeGroup local space
-      const positions = [];
-      for (const name of cityNames) {
-        const c = clusterMap[name];
-        if (c && c.hub) positions.push(c.hub.position.clone());
-      }
-      if (positions.length === 0) continue;
-
-      // Centroid
-      const centroid = new THREE.Vector3();
-      for (const p of positions) centroid.add(p);
-      centroid.divideScalar(positions.length);
-
-      // Build tangent frame at centroid to compute bounding box in local 2D
-      const normal = centroid.clone().normalize();
-      const tangent = new THREE.Vector3()
-        .crossVectors(new THREE.Vector3(0, 1, 0), normal);
-      if (tangent.length() < 0.01) {
-        tangent.crossVectors(new THREE.Vector3(1, 0, 0), normal);
-      }
-      tangent.normalize();
-      const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
-
-      // Project positions into 2D tangent space to find bounding rectangle
-      let minU = Infinity, maxU = -Infinity;
-      let minV = Infinity, maxV = -Infinity;
-      for (const p of positions) {
-        const diff = p.clone().sub(centroid);
-        const u = diff.dot(tangent);
-        const v = diff.dot(bitangent);
-        minU = Math.min(minU, u);
-        maxU = Math.max(maxU, u);
-        minV = Math.min(minV, v);
-        maxV = Math.max(maxV, v);
-      }
-
-      // Add padding (40% beyond bounding box)
-      const spanU = (maxU - minU) * 1.4 || 0.02;
-      const spanV = (maxV - minV) * 1.4 || 0.02;
-
-      // More cells = smaller squares. Per-burst target or default 40.
-      const maxSpan = Math.max(spanU, spanV);
-      const targetCells = def.targetCells || 40;
-      const spacing = Math.max(BASE_SPACING * 0.7, maxSpan / targetCells);
-
-      // Grid half-counts to cover the full bounding box
-      const halfW = Math.max(4, Math.ceil(spanU / 2 / spacing));
-      const halfH = Math.max(4, Math.ceil(spanV / 2 / spacing));
-
-      // Fixed pixel size — sizeAttenuation:false means size is in pixels.
-      // 5px circles — visible but smaller than nodes so they aren't confused.
-      const pointSize = 5;
-
-      const burst = new GridBurst(
-        globeGroup, centroid, halfW, halfH, spacing, pointSize, def.height,
-      );
-      bursts.push({ burst, t: def.t, dur: def.dur });
+    // Get hub positions in globeGroup local space
+    const positions = [];
+    for (const name of cityNames) {
+      const c = clusterMap[name];
+      if (c && c.hub) positions.push(c.hub.position.clone());
     }
-    initialized = true;
+    if (positions.length === 0) return;
+
+    // Centroid
+    const centroid = new THREE.Vector3();
+    for (const p of positions) centroid.add(p);
+    centroid.divideScalar(positions.length);
+
+    // Build tangent frame at centroid to compute bounding box in local 2D
+    const normal = centroid.clone().normalize();
+    const tangent = new THREE.Vector3()
+      .crossVectors(new THREE.Vector3(0, 1, 0), normal);
+    if (tangent.length() < 0.01) {
+      tangent.crossVectors(new THREE.Vector3(1, 0, 0), normal);
+    }
+    tangent.normalize();
+    const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+
+    // Project positions into 2D tangent space to find bounding rectangle
+    let minU = Infinity, maxU = -Infinity;
+    let minV = Infinity, maxV = -Infinity;
+    for (const p of positions) {
+      const diff = p.clone().sub(centroid);
+      const u = diff.dot(tangent);
+      const v = diff.dot(bitangent);
+      minU = Math.min(minU, u);
+      maxU = Math.max(maxU, u);
+      minV = Math.min(minV, v);
+      maxV = Math.max(maxV, v);
+    }
+
+    // Add padding (40% beyond bounding box)
+    const spanU = (maxU - minU) * 1.4 || 0.02;
+    const spanV = (maxV - minV) * 1.4 || 0.02;
+
+    // More cells = smaller squares. Per-burst target or default 40.
+    const maxSpan = Math.max(spanU, spanV);
+    const targetCells = def.targetCells || 40;
+    const spacing = Math.max(BASE_SPACING * 0.7, maxSpan / targetCells);
+
+    // Grid half-counts to cover the full bounding box
+    const halfW = Math.max(4, Math.ceil(spanU / 2 / spacing));
+    const halfH = Math.max(4, Math.ceil(spanV / 2 / spacing));
+
+    // Fixed pixel size — sizeAttenuation:false means size is in pixels.
+    // 5px circles — visible but smaller than nodes so they aren't confused.
+    const pointSize = 5;
+
+    slot.burst = new GridBurst(
+      globeGroup, centroid, halfW, halfH, spacing, pointSize, def.height,
+      !!def.flat, def.flat ? camera : null,
+    );
   }
 
   function update(elapsed, dt) {
-    if (!initialized) {
-      if (elapsed < BURST_DEFS[0].t - 0.5) return;
-      init();
-    }
-
-    for (const b of bursts) {
-      const age = elapsed - b.t;
-      b.burst.update(age, b.dur);
+    for (const slot of burstSlots) {
+      // Lazy init each burst 0.5s before it fires
+      if (!slot.burst && elapsed >= slot.t - 0.5) {
+        initBurst(slot);
+      }
+      if (slot.burst) {
+        const age = elapsed - slot.t;
+        slot.burst.update(age, slot.dur);
+      }
     }
   }
 

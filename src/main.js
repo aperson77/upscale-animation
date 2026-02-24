@@ -61,14 +61,16 @@ if (RECORD_MODE) {
   renderer.setPixelRatio(1);
 } else {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
+  renderer.setPixelRatio(window.devicePixelRatio); // full native resolution
 }
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
 // ─── Post-processing ──────────────────────────────────────────────────────────
-const w0 = RECORD_MODE ? 3840 : window.innerWidth;
-const h0 = RECORD_MODE ? 2160 : window.innerHeight;
+// Use actual pixel dimensions (includes devicePixelRatio) for crisp bloom
+const dpr = RECORD_MODE ? 1 : window.devicePixelRatio;
+const w0 = RECORD_MODE ? 3840 : Math.floor(window.innerWidth * dpr);
+const h0 = RECORD_MODE ? 2160 : Math.floor(window.innerHeight * dpr);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -89,7 +91,7 @@ const classical = createClassicalConnections(globe.globeGroup, globe.clusters);
 const act1 = createAct1Animations(globe.globeGroup, globe.heroNode, globe.clusters);
 const interconnect = createInterconnect(globe.globeGroup, globe.clusters);
 const arctic = createArcticActivation(globe.globeGroup, globe.clusters, globe.satelliteNodes, globe.droneNodes);
-const gridBursts = createGridBursts(globe.globeGroup, globe.clusters);
+const gridBursts = createGridBursts(globe.globeGroup, globe.clusters, camera);
 
 // ─── Camera controller ────────────────────────────────────────────────────────
 const waterlooCluster = globe.clusters.find(c => c.name === 'Waterloo');
@@ -103,7 +105,7 @@ window.__timeline = timeline;
 const overlayWordmark = document.getElementById('wordmark');
 
 // ─── Capability pulse (58s) ─────────────────────────────────────────────────
-const PULSE_T   = 67.0;
+const PULSE_T   = 61.0;
 const PULSE_DUR = 0.5;
 let pulseRings  = null;
 let pulseFired  = false;
@@ -165,8 +167,8 @@ function updatePulse(elapsed) {
 }
 
 // ─── Globe fade-out timing (globe fades, then only logo + background) ───────
-const GLOBE_FADE_START = 77.0;  // globe starts fading (after rotating for ~12s)
-const GLOBE_FADE_END   = 79.0;  // globe fully invisible, only background + logo
+const GLOBE_FADE_START = 67.0;  // globe starts fading (after rotating for ~8s)
+const GLOBE_FADE_END   = 68.0;  // globe fully invisible in 1s, only background + logo
 
 // ─── Shared tick function ─────────────────────────────────────────────────────
 function tick(dt) {
@@ -183,7 +185,7 @@ function tick(dt) {
   updatePulse(timeline.t);
 
   // Globe rotation during finale (opening uses camera drift instead)
-  if (timeline.t >= 65.0) {
+  if (timeline.t >= 59.0) {
     globe.globeGroup.rotation.y += 0.025 * dt;
   }
 
@@ -200,45 +202,31 @@ function tick(dt) {
 }
 
 // ─── HTML overlay driver ──────────────────────────────────────────────────────
-// Cache the vertical shift needed to center the logo (computed once)
-let logoShiftY = null;
-
 function updateOverlays() {
-  // Wordmark fades in at 60-61s (over the rotating globe), stays through fade-out
-  const wordmarkIn = timeline.window(75.0, 76.0);
+  // Wordmark fades in at 65-66s (over the rotating globe)
+  const wordmarkIn = timeline.window(65.0, 66.0);
 
-  // After globe fades out, logo grows bigger and moves to center
-  const growT = timeline.window(79.0, 80.0);
+  // After globe fades out (68s), logo expands in place from center
+  const growT = timeline.window(68.0, 70.0);
 
   overlayWordmark.style.opacity = Math.max(wordmarkIn, growT > 0 ? 1 : 0).toFixed(3);
 
-  if (growT > 0) {
-    if (logoShiftY === null) {
-      // Element is at bottom: 28%. Compute pixels to shift up to reach viewport center.
-      const vh = window.innerHeight;
-      const elementBottomFromTop = vh * 0.72;  // bottom: 28% → 72% from top
-      const elementCenterFromTop = elementBottomFromTop - 28; // ~half of 56px height
-      logoShiftY = elementCenterFromTop - vh * 0.5;
-    }
-    const eased = growT * growT * (3 - 2 * growT); // smoothstep
-    const scale = 1 + eased * 0.6;  // 1× → 1.6×
-    const shiftPx = eased * logoShiftY;
-    overlayWordmark.style.transform =
-      `translateX(-50%) translateY(-${shiftPx.toFixed(1)}px) scale(${scale.toFixed(3)})`;
-  } else {
-    overlayWordmark.style.transform = 'translateX(-50%)';
-  }
+  const eased = growT * growT * (3 - 2 * growT); // smoothstep
+  const scale = 1 + eased * 0.6;  // 1× → 1.6×
+  overlayWordmark.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(3)})`;
 }
 
 // ─── Resize (real-time mode only) ─────────────────────────────────────────────
 if (!RECORD_MODE) {
   function onResize() {
     const w = window.innerWidth, h = window.innerHeight;
+    const pr = window.devicePixelRatio;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    renderer.setPixelRatio(pr);
     composer.setSize(w, h);
-    bloomPass.resolution.set(w, h);
+    bloomPass.resolution.set(Math.floor(w * pr), Math.floor(h * pr));
   }
   window.addEventListener('resize', onResize);
 }
@@ -253,16 +241,29 @@ if (RECORD_MODE) {
 
   // Wait briefly for logo to load, then start
   setTimeout(() => {
-    timeline.start();
+    let timelineStarted = false;
 
     function recordLoop() {
-      tick(recorder.fixedDt);
+      if (recorder.inIntro) {
+        // Intro phase: start screen with logo + "Click to begin"
+        recorder.captureIntroFrame();
+      } else {
+        // Animation phase
+        if (!timelineStarted) {
+          timeline.start();
+          timelineStarted = true;
+        }
+        tick(recorder.fixedDt);
 
-      const wordmarkOpacity = timeline.window(75.0, 76.0);
-      recorder.captureFrame(wordmarkOpacity);
+        const wordmarkIn = timeline.window(65.0, 66.0);
+        const growT = timeline.window(68.0, 70.0);
+        const eased = growT * growT * (3 - 2 * growT);
+        const wordmarkOpacity = Math.max(wordmarkIn, growT > 0 ? 1 : 0);
+        const wordmarkScale = 1 + eased * 0.6;
+        recorder.captureFrame(wordmarkOpacity, wordmarkScale);
+      }
 
       if (!recorder.done) {
-        // Throttle if encoder queue is deep
         if (recorder.backpressure) {
           setTimeout(recordLoop, 5);
         } else {

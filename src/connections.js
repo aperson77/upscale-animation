@@ -36,23 +36,22 @@ const EDGE_DEFS = [
   // Step 1 — 3-city connect (camera hold 23-30, hex IC fires at 23.5)
   { from: 'Waterloo',      to: 'Ottawa',         revealT: 25.0 },
   { from: 'Ottawa',        to: 'Montréal',       revealT: 25.0 },
-  // Step 2 — Newfoundland connects (camera hold 33-39.5, hex IC fires at 33.5)
-  { from: 'Montréal',      to: 'Newfoundland',   revealT: 35.0 },
-  // Step 3 — Calgary/Vancouver connect (camera hold 42-48, hex IC fires at 42.5)
-  { from: 'Waterloo',      to: 'Calgary',        revealT: 44.0 },
-  { from: 'Calgary',       to: 'Vancouver',      revealT: 44.0 },
-  // Step 4 — all Canada, Northern cities connect (camera hold 50.5-56, hex IC fires at 51)
-  { from: 'Yellowknife',   to: 'Inuvik',         revealT: 52.0 },
-  { from: 'Inuvik',        to: 'Tuktoyaktuk',    revealT: 52.0 },
-  { from: 'Iqaluit',       to: 'Cambridge Bay',  revealT: 52.0 },
-  { from: 'Cambridge Bay', to: 'Yellowknife',    revealT: 52.5 },
-  { from: 'Churchill',     to: 'Iqaluit',        revealT: 52.5 },
-  { from: 'Tuktoyaktuk',   to: 'Cambridge Bay',  revealT: 52.5 },
-  { from: 'Alert',         to: 'Iqaluit',        revealT: 53.0 },
-  { from: 'Cambridge Bay', to: 'Alert',          revealT: 53.0 },
-  { from: 'Churchill',     to: 'Yellowknife',    revealT: 53.0 },
-  { from: 'Whitehorse',    to: 'Inuvik',         revealT: 52.5 },
-  { from: 'Whitehorse',    to: 'Yellowknife',    revealT: 53.0 },
+  // Step 2 — Coast-to-coast: St. John's + Calgary + Vancouver (camera hold 33-42)
+  { from: 'Montréal',      to: "St. John's",     revealT: 35.0 },
+  { from: 'Waterloo',      to: 'Calgary',        revealT: 35.5 },
+  { from: 'Calgary',       to: 'Vancouver',      revealT: 35.5 },
+  // Step 3 — all Canada, Northern cities connect (camera hold 44.5-52.5, hex IC fires at 45)
+  { from: 'Yellowknife',   to: 'Inuvik',         revealT: 46.0 },
+  { from: 'Inuvik',        to: 'Tuktoyaktuk',    revealT: 46.0 },
+  { from: 'Iqaluit',       to: 'Cambridge Bay',  revealT: 46.0 },
+  { from: 'Cambridge Bay', to: 'Yellowknife',    revealT: 46.5 },
+  { from: 'Churchill',     to: 'Iqaluit',        revealT: 46.5 },
+  { from: 'Tuktoyaktuk',   to: 'Cambridge Bay',  revealT: 46.5 },
+  { from: 'Alert',         to: 'Iqaluit',        revealT: 47.0 },
+  { from: 'Cambridge Bay', to: 'Alert',          revealT: 47.0 },
+  { from: 'Churchill',     to: 'Yellowknife',    revealT: 47.0 },
+  { from: 'Whitehorse',    to: 'Inuvik',         revealT: 46.5 },
+  { from: 'Whitehorse',    to: 'Yellowknife',    revealT: 47.0 },
 ];
 
 // ─── Great-circle arc ──────────────────────────────────────────────────────

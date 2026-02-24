@@ -1,11 +1,11 @@
 /**
  * camera.js — Keyframed camera path for the 60s animation.
  *
- * 4-shot structure after Beat 4:
- *   Shot 1 (25.5-33s): Southern Canada — Van/Cal/Waterloo/Ottawa/Montreal/Newfoundland
- *   Shot 2 (35-43s):   Whole Canada — all ground clusters
- *   Shot 3 (45-50s):   Satellite — dedicated satellite connection
- *   Shot 4 (52-60s):   Global — rotating globe, orbiting satellite
+ * 3-shot structure after Beat 4:
+ *   Shot 1 (23-30s):   3-city — Waterloo/Ottawa/Montréal
+ *   Shot 2 (33-48s):   Coast-to-coast — NF/Calgary/Vancouver join at once
+ *   Shot 3 (50.5-58.5s): Whole Canada — all ground clusters + Arctic
+ *   Satellite (60.5-63s), Globe (65-80s)
  * Direct keyframe interpolation with cosine easing — smooth, no overshoot.
  */
 
@@ -16,14 +16,14 @@ import { GLOBE_RADIUS, latLonToVec3 } from './globe.js';
 const WATERLOO     = latLonToVec3(43.46, -80.52, GLOBE_RADIUS);
 const OTTAWA       = latLonToVec3(45.42, -75.69, GLOBE_RADIUS);
 const MONTREAL     = latLonToVec3(45.50, -73.57, GLOBE_RADIUS);
-const NEWFOUNDLAND = latLonToVec3(48.50, -55.50, GLOBE_RADIUS);
+const ST_JOHNS = latLonToVec3(48.00, -54.50, GLOBE_RADIUS);
 
 // 3-city centroid — Waterloo/Ottawa/Montréal only (for the connect scene)
 const THREE_CITY_LOOK = WATERLOO.clone().add(OTTAWA).add(MONTREAL).multiplyScalar(1 / 3);
 const THREE_CITY_DIR  = THREE_CITY_LOOK.clone().normalize();
 
-// Eastern Canada midpoint — includes Newfoundland (for wider shot)
-const REGIONAL_LOOK = WATERLOO.clone().add(OTTAWA).add(MONTREAL).add(NEWFOUNDLAND).multiplyScalar(1 / 4);
+// Eastern Canada midpoint — includes St. John's (for wider shot)
+const REGIONAL_LOOK = WATERLOO.clone().add(OTTAWA).add(MONTREAL).add(ST_JOHNS).multiplyScalar(1 / 4);
 const REGIONAL_DIR  = REGIONAL_LOOK.clone().normalize();
 
 // Full globe — camera looks slightly south so satellite is clearly above the limb
@@ -77,16 +77,14 @@ const FOV_KF = [
   { t: 20,    fov: 32 },   // Hold Waterloo cluster
   { t: 23,    fov: 22 },   // View 1 — 3-city (Wat/Ott/Mtl)
   { t: 30,    fov: 22 },   // Hold through IC + connections + grid
-  { t: 33,    fov: 28 },   // View 2 — + Newfoundland
-  { t: 39.5,  fov: 28 },   // Hold through IC + connections + grid
-  { t: 42,    fov: 38 },   // View 3 — + Calgary/Vancouver (wider to show NF)
-  { t: 48,    fov: 38 },   // Hold through IC + connections + grid
-  { t: 50.5,  fov: 40 },   // View 4 — all Canada + Arctic
-  { t: 58.5,  fov: 40 },   // Hold through IC + connections + grid
-  { t: 60.5,  fov: 36 },   // Smooth transition into satellite shot
-  { t: 63,    fov: 36 },   // Hold satellite
-  { t: 65,    fov: 32 },   // Globe — zoomed out, whole Earth visible
-  { t: 80,    fov: 32 },   // Hold through end
+  { t: 33,    fov: 38 },   // View 2 — coast-to-coast (NF + Cal + Van together)
+  { t: 42,    fov: 38 },   // Hold through IC + connections + grid
+  { t: 44.5,  fov: 40 },   // View 3 — all Canada + Arctic
+  { t: 52.5,  fov: 40 },   // Hold through IC + connections + grid
+  { t: 54.5,  fov: 36 },   // Smooth transition into satellite shot
+  { t: 57,    fov: 36 },   // Hold satellite
+  { t: 59,    fov: 32 },   // Globe — zoomed out, whole Earth visible
+  { t: 71,    fov: 32 },   // Hold through end
 ];
 
 function getFOV(elapsed) {
@@ -135,21 +133,18 @@ export function createCameraController(camera, heroNodePos, hubPos) {
     // View 1: 3-city — Waterloo/Ottawa/Montréal (23-30s, 7s hold)
     { t: 23,    pos: camPos(THREE_CITY_DIR, 2.7),    look: THREE_CITY_LOOK.clone()   },
     { t: 30,    pos: camPos(THREE_CITY_DIR, 2.7),    look: THREE_CITY_LOOK.clone()   },
-    // View 2: + Newfoundland (33-39.5s, 6.5s hold)
-    { t: 33,    pos: camPos(REGIONAL_DIR, 3.2),       look: REGIONAL_LOOK.clone()     },
-    { t: 39.5,  pos: camPos(REGIONAL_DIR, 3.2),       look: REGIONAL_LOOK.clone()     },
-    // View 3: + Calgary/Vancouver (42-48s, 6s hold) — zoomed out so NF visible
+    // View 2: Coast-to-coast — NF + Calgary + Vancouver (33-42s, 9s hold)
+    { t: 33,    pos: camPos(WEST_DIR, 4.0),           look: WEST_LOOK.clone()         },
     { t: 42,    pos: camPos(WEST_DIR, 4.0),           look: WEST_LOOK.clone()         },
-    { t: 48,    pos: camPos(WEST_DIR, 4.0),           look: WEST_LOOK.clone()         },
-    // View 4: All Canada + Arctic (50.5-58.5s hold)
-    { t: 50.5,  pos: camPos(CANADA_WIDE_DIR, 4.5),   look: CANADA_WIDE.clone()       },
-    { t: 58.5,  pos: camPos(CANADA_WIDE_DIR, 4.5),   look: CANADA_WIDE.clone()       },
-    // Smooth transition to satellite (58.5-60.5s, 2s blend)
-    { t: 60.5,  pos: camPos(SAT_CAM_DIR, 6.0),       look: SAT_LOOK.clone()          },
-    { t: 63,    pos: camPos(SAT_CAM_DIR, 6.0),       look: SAT_LOOK.clone()          },
-    // Globe — zoom out further so whole globe is visible, then rotate (65-80s)
-    { t: 65,    pos: camPos(GLOBE_DIR, 9.0),          look: GLOBE_CENTER.clone()      },
-    { t: 80,    pos: camPos(GLOBE_DIR, 9.0),          look: GLOBE_CENTER.clone()      },
+    // View 3: All Canada + Arctic (44.5-52.5s hold)
+    { t: 44.5,  pos: camPos(CANADA_WIDE_DIR, 4.5),   look: CANADA_WIDE.clone()       },
+    { t: 52.5,  pos: camPos(CANADA_WIDE_DIR, 4.5),   look: CANADA_WIDE.clone()       },
+    // Smooth transition to satellite (52.5-54.5s, 2s blend)
+    { t: 54.5,  pos: camPos(SAT_CAM_DIR, 6.0),       look: SAT_LOOK.clone()          },
+    { t: 57,    pos: camPos(SAT_CAM_DIR, 6.0),       look: SAT_LOOK.clone()          },
+    // Globe — zoom out further so whole globe is visible, then rotate (59-71s)
+    { t: 59,    pos: camPos(GLOBE_DIR, 9.0),          look: GLOBE_CENTER.clone()      },
+    { t: 71,    pos: camPos(GLOBE_DIR, 9.0),          look: GLOBE_CENTER.clone()      },
   ];
 
   // ── Direct keyframe interpolation ─────────────────────────────────────────

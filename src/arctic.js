@@ -48,35 +48,33 @@ const SOUTHERN_IC_NAMES = [];
 const ARCTIC_IC_NAMES   = ['Inuvik', 'Tuktoyaktuk', 'Alert', 'Cambridge Bay', 'Churchill', 'Whitehorse'];
 const LOCAL_IC_CLUSTER_NAMES = [...SOUTHERN_IC_NAMES, ...ARCTIC_IC_NAMES];
 
-const SOUTHERN_IC_START = 42.0;  // after Cal/Van connections draw
-const ARCTIC_IC_START   = 51.0;  // during all-Canada view (50.5-56)
+const SOUTHERN_IC_START = 36.0;  // after Cal/Van connections draw
+const ARCTIC_IC_START   = 45.0;  // during all-Canada view (44.5-52.5)
 const LOCAL_IC_STAGGER  = 0.05;
 const LOCAL_IC_DUR      = 0.2;
 
 // ─── Satellite uplink definitions — ALL cities connect to satellite ──────────
 const SAT_TO_GROUND = [
-  { from: 'Sat-Polar', to: 'Waterloo',      t: 60.0, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Ottawa',        t: 60.0, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Montréal',      t: 60.0, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Calgary',       t: 60.3, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Newfoundland',  t: 60.3, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Vancouver',     t: 60.3, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Iqaluit',       t: 60.6, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Yellowknife',   t: 60.6, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Churchill',     t: 60.9, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Cambridge Bay', t: 60.9, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Inuvik',        t: 61.2, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Tuktoyaktuk',   t: 61.2, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Alert',         t: 61.5, dur: 0.8 },
-  { from: 'Sat-Polar', to: 'Whitehorse',   t: 61.5, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Waterloo',      t: 54.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Ottawa',        t: 54.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Montréal',      t: 54.0, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Calgary',       t: 54.3, dur: 0.8 },
+  { from: 'Sat-Polar', to: "St. John's",    t: 54.3, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Vancouver',     t: 54.3, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Iqaluit',       t: 54.6, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Yellowknife',   t: 54.6, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Churchill',     t: 54.9, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Cambridge Bay', t: 54.9, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Inuvik',        t: 55.2, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Tuktoyaktuk',   t: 55.2, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Alert',         t: 55.5, dur: 0.8 },
+  { from: 'Sat-Polar', to: 'Whitehorse',   t: 55.5, dur: 0.8 },
 ];
 
-const ORBIT_FREEZE_T   = 60.0;  // freeze satellite orbit when arcs fire (Shot 3)
-const ORBIT_UNFREEZE_T = 65.0;  // release satellite for free orbit (Shot 4)
-const ARC_FADE_START   = 65.0;  // fade out blue arcs when satellite released
+const ARC_FADE_START   = 59.0;  // fade out blue arcs as camera leaves satellite
 const ARC_FADE_DUR     = 2.0;   // seconds to fully fade arcs
 const GROUND_IC_START  = 33.0;  // earliest IC (NF at 33.5)
-const SPACE_ARC_START  = 60.0;
+const SPACE_ARC_START  = 54.0;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
@@ -183,8 +181,6 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
   let spaceArcs = [];
   let groundInitDone = false;
   let spaceInitDone  = false;
-  let orbitsFrozen   = false;
-  let orbitsUnfrozen = false;
 
   function getPos(name) {
     if (satMap[name]) return satMap[name].position.clone();
@@ -238,33 +234,27 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
     groundInitDone = true;
   }
 
-  // ── Init satellite uplinks — straight cylinders (no curves, no wobble) ──
+  // ── Init satellite uplinks — unit-height cylinders that track satellite ──
+  const _yUp = new THREE.Vector3(0, 1, 0);
+  const _dir = new THREE.Vector3();
+
   function initSpace() {
     for (const def of SAT_TO_GROUND) {
-      const satPos    = getPos(def.from);  // satellite (frozen at t=50)
-      const groundPos = getPos(def.to);    // ground hub
-      if (!satPos || !groundPos) continue;
+      const groundPos = getPos(def.to);    // ground hub (static)
+      if (!groundPos) continue;
 
-      // Straight cylinder from ground station to satellite
-      const dir    = new THREE.Vector3().subVectors(satPos, groundPos);
-      const length = dir.length();
-      const mid    = groundPos.clone().add(satPos).multiplyScalar(0.5);
-
-      const geo = new THREE.CylinderGeometry(TUBE_RADIUS, TUBE_RADIUS, length, 6, 1, true);
+      // Unit-height cylinder — scaled each frame to match satellite distance
+      const geo = new THREE.CylinderGeometry(TUBE_RADIUS, TUBE_RADIUS, 1, 6, 1, true);
       const mat = new THREE.MeshBasicMaterial({
         color: BLUE_TUBE, transparent: true, opacity: 0, depthWrite: false,
       });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.copy(mid);
-      mesh.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),  // cylinder default axis
-        dir.clone().normalize(),
-      );
       mesh.visible = false;
       group.add(mesh);
 
       spaceArcs.push({
-        mesh, mat,
+        mesh, mat, geo,
+        groundPos: groundPos.clone(),
         revealT: def.t, drawDur: def.dur,
         drawn: false,
         fromName: def.from, toName: def.to,
@@ -275,20 +265,6 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
 
   // ── Per-frame update ──────────────────────────────────────────────────────
   function update(elapsed, dt) {
-    // ── Freeze orbits when arcs fire (Shot 3) ──────────────────────────
-    if (!orbitsFrozen && elapsed >= ORBIT_FREEZE_T) {
-      for (const s of satelliteNodes) s.orbitFrozen = true;
-      for (const d of droneNodes) d.orbitFrozen = true;
-      orbitsFrozen = true;
-    }
-
-    // ── Unfreeze orbits for free orbit (Shot 4) ─────────────────────────
-    if (orbitsFrozen && !orbitsUnfrozen && elapsed >= ORBIT_UNFREEZE_T) {
-      for (const s of satelliteNodes) s.orbitFrozen = false;
-      for (const d of droneNodes) d.orbitFrozen = false;
-      orbitsUnfrozen = true;
-    }
-
     // ── Phase 1: Ground cluster local ICs ────────────────────────────────
     if (elapsed >= GROUND_IC_START) {
       if (!groundInitDone) initGround();
@@ -341,11 +317,11 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
       }
     }
 
-    // ── Phase 2: Satellite uplinks (straight cylinders ground→orbit) ─────
+    // ── Phase 2: Satellite uplinks — cylinders dynamically track satellite ──
     if (elapsed >= SPACE_ARC_START) {
       if (!spaceInitDone) initSpace();
 
-      // Arc fade-out during Shot 4 — masks disconnect as satellite orbits away
+      // Arc fade-out — masks disconnect as camera leaves satellite
       const fadeProgress = elapsed >= ARC_FADE_START
         ? Math.min((elapsed - ARC_FADE_START) / ARC_FADE_DUR, 1)
         : 0;
@@ -358,6 +334,19 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
           continue;
         }
 
+        // Get live satellite position (it's orbiting)
+        const satNode = satMap[arc.fromName];
+        if (!satNode) continue;
+        const satPos = satNode.position;
+
+        // Recompute cylinder transform to track satellite
+        _dir.subVectors(satPos, arc.groundPos);
+        const length = _dir.length();
+        _dir.normalize();
+        arc.mesh.position.lerpVectors(arc.groundPos, satPos, 0.5);
+        arc.mesh.quaternion.setFromUnitVectors(_yUp, _dir);
+        arc.mesh.scale.set(1, length, 1);  // unit-height geo → stretch to fit
+
         const age   = elapsed - arc.revealT;
         const drawT = Math.min(age / arc.drawDur, 1);
         const drawE = easeOutCubic(drawT);
@@ -367,8 +356,7 @@ export function createArcticActivation(globeGroup, clusters, satelliteNodes, dro
 
         if (drawT >= 1 && !arc.drawn) {
           arc.drawn = true;
-          const sat = satMap[arc.fromName];
-          if (sat) sat.baseColor = COPPER_COLOR.clone();
+          if (satNode) satNode.baseColor = COPPER_COLOR.clone();
         }
       }
     }

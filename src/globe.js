@@ -40,20 +40,20 @@ function _ss(x) { const c = Math.max(0, Math.min(1, x)); return c * c * (3 - 2 *
 const CLUSTERS = [
   // Southern Canada
   { name: 'Waterloo',      lat: 43.46, lon: -80.52,  count: 3, isHero: true,  revealT: 0    },
-  { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 2, isHero: false, revealT: 23.0, spacing: 0.010 },
+  { name: 'Ottawa',        lat: 45.42, lon: -75.69,  count: 3, isHero: false, revealT: 23.0 },
   { name: 'Montréal',      lat: 45.50, lon: -73.57,  count: 3, isHero: false, revealT: 23.0 },
-  { name: 'Newfoundland',  lat: 48.50, lon: -55.50,  count: 2, isHero: false, revealT: 33.0, spacing: 0.010 },
-  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 2, isHero: false, revealT: 42.0, spacing: 0.010 },
-  { name: 'Vancouver',     lat: 49.25, lon:-122.50,  count: 2, isHero: false, revealT: 42.0, spacing: 0.010 },
+  { name: "St. John's",    lat: 48.00, lon: -54.50,  count: 3, isHero: false, revealT: 33.0 },
+  { name: 'Calgary',       lat: 51.05, lon:-114.07,  count: 3, isHero: false, revealT: 33.0 },
+  { name: 'Vancouver',     lat: 49.25, lon:-122.50,  count: 3, isHero: false, revealT: 33.0 },
   // Arctic ground stations
-  { name: 'Iqaluit',       lat: 63.75, lon: -68.70,  count: 2, isHero: false, revealT: 50.5, spacing: 0.010 },
-  { name: 'Yellowknife',   lat: 62.45, lon:-114.37,  count: 2, isHero: false, revealT: 50.5, spacing: 0.010 },
-  { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 1, isHero: false, revealT: 50.5 },
-  { name: 'Tuktoyaktuk',  lat: 69.45, lon:-133.30,  count: 1, isHero: false, revealT: 50.5 },
-  { name: 'Alert',         lat: 81.50, lon: -65.00,  count: 1, isHero: false, revealT: 50.5 },
-  { name: 'Cambridge Bay', lat: 69.12, lon:-105.06,  count: 1, isHero: false, revealT: 50.5 },
-  { name: 'Churchill',     lat: 58.77, lon: -94.40,  count: 1, isHero: false, revealT: 50.5 },
-  { name: 'Whitehorse',   lat: 60.72, lon:-135.05,  count: 1, isHero: false, revealT: 50.5 },
+  { name: 'Iqaluit',       lat: 63.75, lon: -68.70,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Yellowknife',   lat: 62.45, lon:-114.37,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Tuktoyaktuk',  lat: 69.45, lon:-133.30,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Alert',         lat: 82.50, lon: -62.35,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Cambridge Bay', lat: 69.12, lon:-105.06,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Churchill',     lat: 58.77, lon: -94.40,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Whitehorse',   lat: 60.72, lon:-135.05,  count: 3, isHero: false, revealT: 44.5 },
 ];
 
 // Satellite node — polar orbit over Canada (great-circle through the poles)
@@ -62,7 +62,7 @@ const CLUSTERS = [
 //   ~55° puts the satellite over central Canada at reveal
 // radius: orbital altitude above globe center (GLOBE_RADIUS = 2, so 3.5 = 75% above surface)
 const SATELLITES = [
-  { name: 'Sat-Polar', orbitLon: -100, startAngleDeg: 55, radius: 3.5, revealT: 59.0 },
+  { name: 'Sat-Polar', orbitLon: -100, startAngleDeg: 48, radius: 3.5, revealT: 53.0 },
 ];
 
 // No drone relay nodes — satellite bridges south↔north directly
@@ -2413,7 +2413,7 @@ export function createGlobe(scene, renderer) {
   scene.add(globeGroup);
 
   // ── Update called each frame ─────────────────────────────────────────────
-  const SAT_ORBIT_SPEED   = 1.0;   // degrees/second along great-circle polar orbit
+  const SAT_ORBIT_SPEED   = 1.0;   // degrees/second — time-compressed polar orbit
   const _copperColor = new THREE.Color(COLOR_COPPER);
   const _baseBlue    = new THREE.Color(COLOR_BLUE_NODE);
   const _dimBlue     = new THREE.Color(COLOR_BLUE_NODE).multiplyScalar(0.3);
@@ -2422,7 +2422,7 @@ export function createGlobe(scene, renderer) {
   const BREATH_FREQ = 0.20; // Hz — 5-second cycle, smooth breathing
   const SYNC_DUR    = 1.5;  // seconds for phase convergence
   const IC_CLUSTERS = new Set([
-    'Waterloo', 'Ottawa', 'Montréal', 'Newfoundland',
+    'Waterloo', 'Ottawa', 'Montréal', "St. John's",
     'Calgary', 'Vancouver', 'Iqaluit', 'Yellowknife',
   ]); // all multi-node clusters with hexagon interconnect
   let citySyncTriggered = false; // cross-cluster sync flag

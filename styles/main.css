@@ -77,19 +77,19 @@ html, body {
   white-space: nowrap;
 }
 
-/* Final wordmark — bottom third */
+/* Final wordmark — centered */
 .wordmark {
   position: absolute;
   left: 50%;
-  bottom: 28%;
-  transform: translateX(-50%);
+  top: 50%;
+  transform: translate(-50%, -50%);
   text-align: center;
   opacity: 0;
   pointer-events: none;
 }
 
 .wordmark-img {
-  height: 56px;
+  height: 80px;
   display: block;
   filter: invert(1);
   mix-blend-mode: screen;
@@ -118,7 +118,7 @@ html, body {
 }
 
 .start-logo-img {
-  height: 72px;
+  height: 100px;
   display: block;
   margin: 0 auto 28px;
   filter: invert(1);

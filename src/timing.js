@@ -23,12 +23,12 @@ export const PHASES = Object.freeze({
   BEAT3: { start: 12_000, end: 18_000 },
   BEAT4: { start: 18_000, end: 27_000 },
   SHOT1: { start: 20_000, end: 42_000 },
-  SHOT2: { start: 42_000, end: 59_000 },
-  SHOT3: { start: 59_000, end: 63_000 },
-  SHOT4: { start: 65_000, end: 80_000 },
+  SHOT2: { start: 42_000, end: 53_000 },
+  SHOT3: { start: 53_000, end: 57_000 },
+  SHOT4: { start: 59_000, end: 71_000 },
 });
 
-export const TOTAL_DURATION = 80_000; // ms
+export const TOTAL_DURATION = 71_000; // ms
 
 // ─── Easing functions ─────────────────────────────────────────────────────────
 // All take t ∈ [0, 1] and return a value ∈ [0, 1].
