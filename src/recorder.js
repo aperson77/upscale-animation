@@ -117,7 +117,7 @@ export class Recorder {
 
   // ── Capture one frame ───────────────────────────────────────────────────────
 
-  captureFrame(wordmarkOpacity = 0, wordmarkScale = 1) {
+  captureFrame(wordmarkOpacity = 0, wordmarkScale = 1, washColor = null, washOpacity = 0) {
     const ctx = this.ctx;
 
     // 1. Draw the WebGL canvas
@@ -131,6 +131,15 @@ export class Recorder {
     grad.addColorStop(1, 'rgba(13,21,32,0.55)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, REC_WIDTH, REC_HEIGHT);
+
+    // 2b. Finale wash overlay (golden → black, matches #finale-wash)
+    if (washOpacity > 0.001 && washColor) {
+      ctx.save();
+      ctx.globalAlpha = washOpacity;
+      ctx.fillStyle = washColor;
+      ctx.fillRect(0, 0, REC_WIDTH, REC_HEIGHT);
+      ctx.restore();
+    }
 
     // 3. Wordmark logo (centered, scales up, invert + screen blend — matches CSS)
     if (wordmarkOpacity > 0.001 && this.logoReady) {

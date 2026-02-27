@@ -50,7 +50,7 @@ const CLUSTERS = [
   { name: 'Yellowknife',   lat: 62.45, lon:-114.37,  count: 3, isHero: false, revealT: 44.5 },
   { name: 'Inuvik',        lat: 68.36, lon:-133.72,  count: 3, isHero: false, revealT: 44.5 },
   { name: 'Tuktoyaktuk',  lat: 69.45, lon:-133.30,  count: 3, isHero: false, revealT: 44.5 },
-  { name: 'Alert',         lat: 82.50, lon: -62.35,  count: 3, isHero: false, revealT: 44.5 },
+  { name: 'Alert',         lat: 79.50, lon: -72.00,  count: 3, isHero: false, revealT: 44.5 },
   { name: 'Cambridge Bay', lat: 69.12, lon:-105.06,  count: 3, isHero: false, revealT: 44.5 },
   { name: 'Churchill',     lat: 58.77, lon: -94.40,  count: 3, isHero: false, revealT: 44.5 },
   { name: 'Whitehorse',   lat: 60.72, lon:-135.05,  count: 3, isHero: false, revealT: 44.5 },

@@ -26,6 +26,7 @@ import { isRecordMode, Recorder }      from './recorder.js';
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BG_COLOR     = new THREE.Color(0x0d1520);
 const RECORD_MODE  = isRecordMode();
+const AUTO_START   = new URLSearchParams(window.location.search).has('autostart');
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('canvas');
@@ -166,9 +167,38 @@ function updatePulse(elapsed) {
   }
 }
 
-// ─── Globe fade-out timing (globe fades, then only logo + background) ───────
-const GLOBE_FADE_START = 67.0;  // globe starts fading (after rotating for ~8s)
-const GLOBE_FADE_END   = 68.0;  // globe fully invisible in 1s, only background + logo
+// ─── Finale timing ──────────────────────────────────────────────────────────
+// Glow build-up: nodes get brighter, bloom from nodes fills the screen (63.5-67.5s)
+const GLOW_START = 63.5;
+const GLOW_END   = 67.5;
+// Yellow → black via HTML overlay (67.5-69s)
+const BLACK_START = 67.5;
+const BLACK_END   = 69.0;
+// Logo appears on black (69-71s)
+
+const finaleWash = document.getElementById('finale-wash');
+
+// Snapshot original node colors on first call (after globe.update has run)
+let _finaleNodes = null;
+function getFinaleNodes() {
+  if (_finaleNodes) return _finaleNodes;
+  _finaleNodes = [];
+  for (const c of globe.clusters) {
+    for (const n of c.nodes) {
+      n._origColor = n.mat.color.clone();
+      _finaleNodes.push(n);
+    }
+  }
+  for (const s of globe.satelliteNodes) {
+    s._origColor = s.mat.color.clone();
+    _finaleNodes.push(s);
+  }
+  for (const d of globe.droneNodes) {
+    d._origColor = d.mat.color.clone();
+    _finaleNodes.push(d);
+  }
+  return _finaleNodes;
+}
 
 // ─── Shared tick function ─────────────────────────────────────────────────────
 function tick(dt) {
@@ -189,13 +219,54 @@ function tick(dt) {
     globe.globeGroup.rotation.y += 0.025 * dt;
   }
 
-  // Globe fade-out: reduce tone mapping exposure so 3D geometry disappears
-  // (scene.background is unaffected by tone mapping — stays as the base color)
-  if (timeline.t >= GLOBE_FADE_START) {
-    const fadeT = Math.min((timeline.t - GLOBE_FADE_START) / (GLOBE_FADE_END - GLOBE_FADE_START), 1);
-    renderer.toneMappingExposure = 1.0 - fadeT;
-  } else {
+  const t = timeline.t;
+
+  // ── Glow build-up (62-67.5s) ──────────────────────────────────────────────
+  // The nodes themselves get brighter and their bloom glow expands until it
+  // floods the screen. Background stays dark — all light comes FROM nodes.
+  // Gentle power curve (raw^1.5): subtle start, steady build.
+  if (t >= GLOW_START && t < BLACK_START) {
+    const raw = Math.min((t - GLOW_START) / (GLOW_END - GLOW_START), 1);
+    const glowT = Math.pow(raw, 1.5);  // gentle power curve
+
+    // Ramp node brightness — no color change, just pure intensity.
+    // ACES tone mapping naturally warms very bright pixels.
+    const nodes = getFinaleNodes();
+    const bri = 1.0 + glowT * 7.0;  // 1× → 8×
+    for (const node of nodes) {
+      if (!node.mesh || !node.mesh.visible) continue;
+      node.mat.color.copy(node._origColor).multiplyScalar(bri);
+    }
+
+    // Bloom: high strength + wide radius so node glows merge and fill screen
+    bloomPass.strength  = 0.35 + glowT * 3.15;        // 0.35 → 3.5
+    bloomPass.threshold = 0.25 * (1 - glowT);          // 0.25 → 0
+    bloomPass.radius    = 0.60 + glowT * 0.9;          // 0.6 → 1.5
+    // Exposure stays low — brightness comes from nodes, not global boost
+    renderer.toneMappingExposure = 1.0 + glowT * 0.5;  // 1.0 → 1.5
+
+    // Fade out the globe surface so nodes glow against pure dark background
+    // (removes ocean texture that makes northern nodes look "watery")
+    globe.sphereMesh.material.transparent = true;
+    globe.sphereMesh.material.opacity = 1 - glowT;
+  }
+
+  // ── Post-glow: globe hidden, overlay handles yellow → black ───────────────
+  else if (t >= BLACK_START) {
+    globe.globeGroup.visible = false;
     renderer.toneMappingExposure = 1.0;
+    bloomPass.strength  = 0.35;
+    bloomPass.threshold = 0.25;
+    bloomPass.radius    = 0.60;
+  }
+
+  // ── Before finale: normal defaults ────────────────────────────────────────
+  else {
+    renderer.toneMappingExposure = 1.0;
+    bloomPass.strength  = 0.35;
+    bloomPass.threshold = 0.25;
+    bloomPass.radius    = 0.60;
+    scene.background.copy(BG_COLOR);
   }
 
   composer.render();
@@ -203,16 +274,34 @@ function tick(dt) {
 
 // ─── HTML overlay driver ──────────────────────────────────────────────────────
 function updateOverlays() {
-  // Wordmark fades in at 65-66s (over the rotating globe)
-  const wordmarkIn = timeline.window(65.0, 66.0);
+  const t = timeline.t;
 
-  // After globe fades out (68s), logo expands in place from center
-  const growT = timeline.window(68.0, 70.0);
+  // ── Finale wash overlay ───────────────────────────────────────────────────
+  // Fades in during last 1s of glow to catch remaining dark areas
+  if (t >= 66.5 && t < BLACK_START) {
+    const fadeIn = Math.min((t - 66.5) / 1.0, 1);
+    finaleWash.style.opacity = fadeIn.toFixed(4);
+    finaleWash.style.background = '#fffbe6';
+  } else if (t >= BLACK_START) {
+    finaleWash.style.opacity = '1';
+    const raw = Math.min((t - BLACK_START) / (BLACK_END - BLACK_START), 1);
+    const blackT = raw * raw * (3 - 2 * raw); // smoothstep
+    // Lerp #fffbe6 rgb(255,251,230) → black
+    const r = Math.round(255 * (1 - blackT));
+    const g = Math.round(251 * (1 - blackT));
+    const b = Math.round(230 * (1 - blackT));
+    finaleWash.style.background = `rgb(${r},${g},${b})`;
+  } else {
+    finaleWash.style.opacity = '0';
+  }
 
-  overlayWordmark.style.opacity = Math.max(wordmarkIn, growT > 0 ? 1 : 0).toFixed(3);
+  // ── Logo: fades in on black (69-70s), gentle scale-up (70-71s) ──
+  const logoIn = timeline.window(69.0, 70.0);
+  const growT = timeline.window(70.0, 71.0);
+  const eased = growT * growT * (3 - 2 * growT);
+  const scale = 1 + eased * 0.3;
 
-  const eased = growT * growT * (3 - 2 * growT); // smoothstep
-  const scale = 1 + eased * 0.6;  // 1× → 1.6×
+  overlayWordmark.style.opacity = logoIn.toFixed(3);
   overlayWordmark.style.transform = `translate(-50%, -50%) scale(${scale.toFixed(3)})`;
 }
 
@@ -255,12 +344,28 @@ if (RECORD_MODE) {
         }
         tick(recorder.fixedDt);
 
-        const wordmarkIn = timeline.window(65.0, 66.0);
-        const growT = timeline.window(68.0, 70.0);
+        // Finale wash for recorder (mirrors updateOverlays logic)
+        const rt = timeline.t;
+        let washOpacity = 0, washColor = null;
+        if (rt >= 66.5 && rt < BLACK_START) {
+          washOpacity = Math.min((rt - 66.5) / 1.0, 1);
+          washColor = '#fffbe6';
+        } else if (rt >= BLACK_START) {
+          washOpacity = 1;
+          const raw = Math.min((rt - BLACK_START) / (BLACK_END - BLACK_START), 1);
+          const bT = raw * raw * (3 - 2 * raw);
+          const r = Math.round(255 * (1 - bT));
+          const g = Math.round(251 * (1 - bT));
+          const b = Math.round(230 * (1 - bT));
+          washColor = `rgb(${r},${g},${b})`;
+        }
+
+        const logoIn = timeline.window(69.0, 70.0);
+        const growT = timeline.window(70.0, 71.0);
         const eased = growT * growT * (3 - 2 * growT);
-        const wordmarkOpacity = Math.max(wordmarkIn, growT > 0 ? 1 : 0);
-        const wordmarkScale = 1 + eased * 0.6;
-        recorder.captureFrame(wordmarkOpacity, wordmarkScale);
+        const wordmarkOpacity = logoIn;
+        const wordmarkScale = 1 + eased * 0.3;
+        recorder.captureFrame(wordmarkOpacity, wordmarkScale, washColor, washOpacity);
       }
 
       if (!recorder.done) {
@@ -279,10 +384,16 @@ if (RECORD_MODE) {
 
 } else {
   // ── Real-time mode ───────────────────────────────────────────────────────
-  startScreen.addEventListener('click', () => {
+  if (AUTO_START) {
+    // Iframe / embed mode: skip start screen, begin immediately
     startScreen.classList.add('hidden');
     timeline.start();
-  }, { once: true });
+  } else {
+    startScreen.addEventListener('click', () => {
+      startScreen.classList.add('hidden');
+      timeline.start();
+    }, { once: true });
+  }
 
   let lastTime = performance.now();
 

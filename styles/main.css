@@ -36,6 +36,16 @@ html, body {
   left: 0;
 }
 
+/* Finale wash — covers canvas, below logo overlay */
+#finale-wash {
+  position: fixed;
+  inset: 0;
+  background: #fffbe6;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
 /* HTML overlay — sits above canvas */
 #overlay {
   position: fixed;
